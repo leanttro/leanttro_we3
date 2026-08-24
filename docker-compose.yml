@@ -1,0 +1,38 @@
+version: '3.8'
+
+# ═════════════════════════════════════════
+# APLICAÇÃO ÚNICA — API (FastAPI) serve tanto a API quanto o
+# frontend (login.html, dashboard.html, admin.html) direto.
+# Não tem mais container de nginx separado.
+# No Dokploy: uma Application só, build com Dockerfile.api,
+# domínio wpp.leanttro.com apontando pra porta 8000.
+# Baileys continua sendo outra Application/Compose, sem domínio.
+# ═════════════════════════════════════════
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: estoque-wpp-api
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-admin-token-change-in-production}
+      GROQ_API_KEY_1: ${GROQ_API_KEY_1:-}
+      GROQ_API_KEY_2: ${GROQ_API_KEY_2:-}
+      DATABASE_URL: ${DATABASE_URL}
+      BAILEYS_URL: http://estoque-wpp-baileys:3000
+    networks:
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.wpp-api.rule=Host(`wpp.leanttro.com`)"
+      - "traefik.http.routers.wpp-api.entrypoints=websecure"
+      - "traefik.http.routers.wpp-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.wpp-api.loadbalancer.server.port=8000"
+    command: uvicorn app:app --host 0.0.0.0 --port 8000
+    restart: always
+
+networks:
+  dokploy-network:
+    external: true
