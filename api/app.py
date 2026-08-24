@@ -745,6 +745,10 @@ def root():
 def pagina_login():
     return FileResponse("frontend/login.html")
 
+@app.get("/admin-login.html")
+def pagina_admin_login():
+    return FileResponse("frontend/admin-login.html")
+
 @app.get("/dashboard.html")
 def pagina_dashboard():
     return FileResponse("frontend/dashboard.html")
