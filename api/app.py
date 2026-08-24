@@ -42,7 +42,9 @@ MENU_TEXTO = (
     "2️⃣ Registrar venda\n"
     "3️⃣ Consultar estoque de um produto\n"
     "4️⃣ Ajuste manual\n"
-    "5️⃣ Resumo do dia\n\n"
+    "5️⃣ Resumo do dia\n"
+    "6️⃣ Cadastrar matéria-prima\n"
+    "7️⃣ Montar receita de um produto\n\n"
     "Responda com o número da opção."
 )
 
@@ -158,6 +160,26 @@ class MovimentacaoManualBody(BaseModel):
     quantidade: float
     valor_unitario: Optional[float] = 0
 
+class MateriaPrimaBody(BaseModel):
+    nome: str
+    sku: Optional[str] = None
+    custo_unitario: Optional[float] = 0
+    estoque_atual: Optional[float] = 0
+    unidade: Optional[str] = "un"
+
+class MovimentacaoMateriaPrimaBody(BaseModel):
+    materia_prima_id: int
+    tipo: str  # entrada | saida | ajuste
+    quantidade: float
+    valor_unitario: Optional[float] = 0
+
+class ReceitaItemBody(BaseModel):
+    materia_prima_id: int
+    quantidade_necessaria: float
+
+class ReceitaBody(BaseModel):
+    itens: list[ReceitaItemBody]
+
 # ─────────────────────────────────────────
 #  HELPERS DE NEGÓCIO
 # ─────────────────────────────────────────
@@ -191,6 +213,13 @@ def buscar_produto_por_nome(conn, cliente_id: int, nome: str):
         ORDER BY id LIMIT 1
     """, (cliente_id, f"%{nome.strip()}%"))
 
+def buscar_materia_prima_por_nome(conn, cliente_id: int, nome: str):
+    return db_one(conn, """
+        SELECT * FROM materias_primas
+        WHERE cliente_id = %s AND ativo = TRUE AND nome ILIKE %s
+        ORDER BY id LIMIT 1
+    """, (cliente_id, f"%{nome.strip()}%"))
+
 def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, origem, mensagem_original=None):
     quantidade = float(quantidade)
     valor_unitario = float(valor_unitario or 0)
@@ -209,10 +238,61 @@ def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tip
         db_exec(conn, "UPDATE produtos SET estoque_atual = estoque_atual - %s WHERE id = %s", (quantidade, produto_id))
         if tipo == "venda" and valor_unitario:
             db_exec(conn, "UPDATE produtos SET preco_venda = %s WHERE id = %s", (valor_unitario, produto_id))
+        if tipo == "venda":
+            # Toda venda de um produto que tem receita cadastrada desconta
+            # automaticamente a matéria-prima usada (ficha técnica / BOM).
+            baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade, origem)
     elif tipo == "ajuste":
         db_exec(conn, "UPDATE produtos SET estoque_atual = %s WHERE id = %s", (quantidade, produto_id))
 
     return valor_total
+
+# ─────────────────────────────────────────
+#  MATÉRIA-PRIMA / RECEITA (ficha técnica)
+# ─────────────────────────────────────────
+def aplicar_movimentacao_materia_prima(conn, cliente_id, materia_prima_id, numero_autorizado_id, tipo,
+                                        quantidade, valor_unitario, origem, mensagem_original=None,
+                                        produto_id_origem=None):
+    quantidade = float(quantidade)
+    valor_unitario = float(valor_unitario or 0)
+    valor_total = round(quantidade * valor_unitario, 2)
+
+    db_exec(conn, """
+        INSERT INTO movimentacoes_materia_prima
+            (cliente_id, materia_prima_id, numero_autorizado_id, tipo, quantidade, valor_unitario,
+             valor_total, origem, mensagem_original, produto_id_origem)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (cliente_id, materia_prima_id, numero_autorizado_id, tipo, quantidade, valor_unitario,
+          valor_total, origem, mensagem_original, produto_id_origem))
+
+    if tipo == "entrada":
+        db_exec(conn, "UPDATE materias_primas SET estoque_atual = estoque_atual + %s, custo_unitario = %s WHERE id = %s",
+                (quantidade, valor_unitario, materia_prima_id))
+    elif tipo in ("saida", "baixa_receita"):
+        db_exec(conn, "UPDATE materias_primas SET estoque_atual = estoque_atual - %s WHERE id = %s",
+                (quantidade, materia_prima_id))
+    elif tipo == "ajuste":
+        db_exec(conn, "UPDATE materias_primas SET estoque_atual = %s WHERE id = %s", (quantidade, materia_prima_id))
+
+    return valor_total
+
+def baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade_vendida, origem):
+    """Ao vender 1 ou mais unidades de um produto, desconta a matéria-prima
+    de cada item da receita cadastrada, proporcionalmente à quantidade vendida.
+    Produtos sem receita cadastrada simplesmente não têm nenhum item aqui."""
+    itens = db_all(conn, """
+        SELECT r.materia_prima_id, r.quantidade_necessaria, m.custo_unitario
+        FROM receita_itens r
+        JOIN materias_primas m ON m.id = r.materia_prima_id
+        WHERE r.produto_id = %s AND m.ativo = TRUE
+    """, (produto_id,))
+    for item in itens:
+        qtd_baixa = round(float(item["quantidade_necessaria"]) * float(quantidade_vendida), 4)
+        aplicar_movimentacao_materia_prima(
+            conn, cliente_id, item["materia_prima_id"], numero_autorizado_id,
+            "baixa_receita", qtd_baixa, item["custo_unitario"],
+            origem=origem, produto_id_origem=produto_id
+        )
 
 # ─────────────────────────────────────────
 #  IA (GROQ) — extração estruturada
@@ -302,6 +382,14 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, f"{tipo}_produto", {"tipo": tipo})
             return pergunta
 
+        if texto.strip() == "6":
+            salvar_sessao(conn, numero_autorizado_id, "mp_nome", {})
+            return "Qual o nome da nova matéria-prima?"
+
+        if texto.strip() == "7":
+            salvar_sessao(conn, numero_autorizado_id, "receita_produto_nome", {})
+            return "De qual produto você quer montar/editar a receita? (nome)"
+
         # modo IA: tenta extrair da mensagem livre antes de cair no menu
         if cliente["plano"] == "ia":
             extraido = await chamar_groq_json(texto, get_groq_key(cliente))
@@ -370,6 +458,112 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             f"{acao} {dados['quantidade']} × *{dados['produto_nome']}* a R$ {valor:.2f} "
             f"(total R$ {total:.2f})\n\nResponda SIM ou NÃO."
         )
+
+    # ── ETAPA: cadastro de matéria-prima (opção 6) ──
+    if etapa == "mp_nome":
+        dados["mp_nome"] = texto.strip()
+        salvar_sessao(conn, numero_autorizado_id, "mp_unidade", dados)
+        return "Qual a unidade de medida? (ex: kg, g, l, ml, un) — ou digite PULAR para usar 'un'"
+
+    if etapa == "mp_unidade":
+        dados["mp_unidade"] = texto.strip() if texto_low != "pular" else "un"
+        salvar_sessao(conn, numero_autorizado_id, "mp_custo", dados)
+        return "Qual o custo unitário (R$)? — digite 0 se ainda não souber"
+
+    if etapa == "mp_custo":
+        try:
+            custo = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do custo, por favor."
+        dados["mp_custo"] = custo
+        salvar_sessao(conn, numero_autorizado_id, "mp_estoque", dados)
+        return "Qual o estoque inicial dessa matéria-prima?"
+
+    if etapa == "mp_estoque":
+        try:
+            estoque = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do estoque, por favor."
+        dados["mp_estoque"] = estoque
+        salvar_sessao(conn, numero_autorizado_id, "confirmando_mp", dados)
+        return (
+            f"Confirma o cadastro?\n"
+            f"*{dados['mp_nome']}* | {dados['mp_unidade']} | custo R$ {dados['mp_custo']:.2f} | "
+            f"estoque inicial {estoque}\n\nResponda SIM ou NÃO."
+        )
+
+    if etapa == "confirmando_mp":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            existente = buscar_materia_prima_por_nome(conn, cliente["id"], dados["mp_nome"])
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            if existente:
+                return f"⚠️ Já existe uma matéria-prima chamada '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu()
+            db_exec(conn, """
+                INSERT INTO materias_primas (cliente_id, nome, unidade, custo_unitario, estoque_atual)
+                VALUES (%s,%s,%s,%s,%s)
+            """, (cliente["id"], dados["mp_nome"], dados["mp_unidade"], dados["mp_custo"], dados["mp_estoque"]))
+            return "✅ Matéria-prima cadastrada com sucesso!\n\n" + resposta_menu()
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Cancelado.\n\n" + resposta_menu()
+        return "Responda SIM ou NÃO."
+
+    # ── ETAPA: montar receita de um produto (opção 7) ──
+    if etapa == "receita_produto_nome":
+        produto = buscar_produto_por_nome(conn, cliente["id"], texto)
+        if not produto:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return f"Produto '{texto}' não encontrado. Cadastre o produto primeiro (opção 1) ou confira o nome.\n\n" + resposta_menu()
+        dados = {"receita_produto_id": produto["id"], "receita_produto_nome": produto["nome"], "receita_itens": []}
+        salvar_sessao(conn, numero_autorizado_id, "receita_item_nome", dados)
+        return (
+            f"Montando a receita de *{produto['nome']}*.\n"
+            f"Qual matéria-prima entra nela? (nome) — quando terminar, digite PRONTO"
+        )
+
+    if etapa == "receita_item_nome":
+        if texto_low == "pronto":
+            if not dados.get("receita_itens"):
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return "Nenhum item adicionado. Receita cancelada.\n\n" + resposta_menu()
+            salvar_sessao(conn, numero_autorizado_id, "confirmando_receita", dados)
+            linhas = "\n".join(f"- {i['quantidade']} {i['unidade']} de {i['nome']}" for i in dados["receita_itens"])
+            return f"Confirma a receita de *{dados['receita_produto_nome']}*?\n{linhas}\n\nResponda SIM ou NÃO."
+        materia = buscar_materia_prima_por_nome(conn, cliente["id"], texto)
+        if not materia:
+            return f"Matéria-prima '{texto}' não encontrada. Cadastre primeiro (opção 6), tente outro nome, ou digite PRONTO."
+        dados["receita_item_atual"] = {"id": materia["id"], "nome": materia["nome"], "unidade": materia["unidade"]}
+        salvar_sessao(conn, numero_autorizado_id, "receita_item_qtd", dados)
+        return f"Quantos {materia['unidade']} de *{materia['nome']}* vão em 1 unidade do produto?"
+
+    if etapa == "receita_item_qtd":
+        try:
+            quantidade = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número da quantidade, por favor."
+        item = dados["receita_item_atual"]
+        dados.setdefault("receita_itens", []).append({
+            "materia_prima_id": item["id"], "nome": item["nome"], "unidade": item["unidade"], "quantidade": quantidade
+        })
+        dados.pop("receita_item_atual", None)
+        salvar_sessao(conn, numero_autorizado_id, "receita_item_nome", dados)
+        return "Adicionado! Mais alguma matéria-prima? (nome) — ou digite PRONTO para terminar"
+
+    if etapa == "confirmando_receita":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            produto_id = dados["receita_produto_id"]
+            db_exec(conn, "DELETE FROM receita_itens WHERE produto_id = %s", (produto_id,))
+            for item in dados["receita_itens"]:
+                db_exec(conn, """
+                    INSERT INTO receita_itens (produto_id, materia_prima_id, quantidade_necessaria)
+                    VALUES (%s,%s,%s)
+                """, (produto_id, item["materia_prima_id"], item["quantidade"]))
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "✅ Receita salva com sucesso! A partir de agora, vender esse produto já desconta a matéria-prima automaticamente.\n\n" + resposta_menu()
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Cancelado.\n\n" + resposta_menu()
+        return "Responda SIM ou NÃO."
 
     # ── ETAPA: confirmando ──
     if etapa == "confirmando":
@@ -606,6 +800,105 @@ def deletar_produto(produto_id: int, cliente=Depends(get_current_cliente), conn=
     return {"ok": True}
 
 # ═════════════════════════════════════════
+#  MATÉRIAS-PRIMAS (painel do cliente)
+# ═════════════════════════════════════════
+@app.get("/materias-primas")
+def listar_materias_primas(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    return db_all(conn, "SELECT * FROM materias_primas WHERE cliente_id = %s AND ativo = TRUE ORDER BY nome",
+                  (cliente["id"],))
+
+@app.post("/materias-primas")
+def criar_materia_prima(body: MateriaPrimaBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    return db_exec(conn, """
+        INSERT INTO materias_primas (cliente_id, nome, sku, custo_unitario, estoque_atual, unidade)
+        VALUES (%s,%s,%s,%s,%s,%s) RETURNING *
+    """, (cliente["id"], body.nome, body.sku, body.custo_unitario, body.estoque_atual, body.unidade))
+
+@app.put("/materias-primas/{materia_id}")
+def atualizar_materia_prima(materia_id: int, body: MateriaPrimaBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    db_exec(conn, """
+        UPDATE materias_primas SET nome=%s, sku=%s, custo_unitario=%s, estoque_atual=%s, unidade=%s
+        WHERE id=%s AND cliente_id=%s
+    """, (body.nome, body.sku, body.custo_unitario, body.estoque_atual, body.unidade, materia_id, cliente["id"]))
+    return {"ok": True}
+
+@app.delete("/materias-primas/{materia_id}")
+def deletar_materia_prima(materia_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    db_exec(conn, "UPDATE materias_primas SET ativo = FALSE WHERE id = %s AND cliente_id = %s",
+            (materia_id, cliente["id"]))
+    return {"ok": True}
+
+@app.post("/materias-primas/movimentacao")
+def criar_movimentacao_materia_prima_manual(body: MovimentacaoMateriaPrimaBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    materia = db_one(conn, "SELECT * FROM materias_primas WHERE id = %s AND cliente_id = %s",
+                      (body.materia_prima_id, cliente["id"]))
+    if not materia:
+        raise HTTPException(status_code=404, detail="Matéria-prima não encontrada")
+    aplicar_movimentacao_materia_prima(conn, cliente["id"], body.materia_prima_id, None, body.tipo,
+                                        body.quantidade, body.valor_unitario, origem="manual_painel")
+    return {"ok": True}
+
+@app.get("/movimentacoes-materia-prima")
+def listar_movimentacoes_materia_prima(
+    materia_prima_id: Optional[int] = None, tipo: Optional[str] = None,
+    de: Optional[str] = None, ate: Optional[str] = None,
+    cliente=Depends(get_current_cliente), conn=Depends(get_db)
+):
+    sql = """
+        SELECT mv.*, m.nome AS materia_prima_nome, n.nome AS registrado_por, p.nome AS produto_origem_nome
+        FROM movimentacoes_materia_prima mv
+        JOIN materias_primas m ON m.id = mv.materia_prima_id
+        LEFT JOIN numeros_autorizados n ON n.id = mv.numero_autorizado_id
+        LEFT JOIN produtos p ON p.id = mv.produto_id_origem
+        WHERE mv.cliente_id = %s
+    """
+    params = [cliente["id"]]
+    if materia_prima_id:
+        sql += " AND mv.materia_prima_id = %s"; params.append(materia_prima_id)
+    if tipo:
+        sql += " AND mv.tipo = %s"; params.append(tipo)
+    if de:
+        sql += " AND mv.criado_em::date >= %s"; params.append(de)
+    if ate:
+        sql += " AND mv.criado_em::date <= %s"; params.append(ate)
+    sql += " ORDER BY mv.criado_em DESC LIMIT 500"
+    return db_all(conn, sql, tuple(params))
+
+# ═════════════════════════════════════════
+#  RECEITA / FICHA TÉCNICA (produto ⇄ matérias-primas)
+# ═════════════════════════════════════════
+@app.get("/produtos/{produto_id}/receita")
+def obter_receita(produto_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s", (produto_id, cliente["id"]))
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+    return db_all(conn, """
+        SELECT r.id, r.materia_prima_id, r.quantidade_necessaria,
+               m.nome AS materia_prima_nome, m.unidade, m.estoque_atual, m.custo_unitario
+        FROM receita_itens r
+        JOIN materias_primas m ON m.id = r.materia_prima_id
+        WHERE r.produto_id = %s
+        ORDER BY m.nome
+    """, (produto_id,))
+
+@app.put("/produtos/{produto_id}/receita")
+def salvar_receita(produto_id: int, body: ReceitaBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s", (produto_id, cliente["id"]))
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+    db_exec(conn, "DELETE FROM receita_itens WHERE produto_id = %s", (produto_id,))
+    for item in body.itens:
+        materia = db_one(conn, "SELECT id FROM materias_primas WHERE id = %s AND cliente_id = %s",
+                          (item.materia_prima_id, cliente["id"]))
+        if not materia:
+            raise HTTPException(status_code=400, detail=f"Matéria-prima {item.materia_prima_id} não encontrada")
+        db_exec(conn, """
+            INSERT INTO receita_itens (produto_id, materia_prima_id, quantidade_necessaria)
+            VALUES (%s,%s,%s)
+        """, (produto_id, item.materia_prima_id, item.quantidade_necessaria))
+    return {"ok": True}
+
+# ═════════════════════════════════════════
 #  MOVIMENTAÇÕES / DASHBOARD
 # ═════════════════════════════════════════
 @app.get("/movimentacoes")
@@ -704,12 +997,17 @@ def export_csv(de: Optional[str] = None, ate: Optional[str] = None,
 @app.post("/webhook/mensagem")
 async def webhook_mensagem(payload: dict, conn=Depends(get_db)):
     remote_jid = payload.get("remoteJid", "")
+    numero_resolvido = payload.get("numeroResolvido")  # ex: "5511999998888@s.whatsapp.net", quando o remote_jid é @lid
     texto = payload.get("text")
     from_me = payload.get("fromMe", False)
     if from_me or not texto or remote_jid.endswith("@g.us"):
         return {"ok": True}
 
-    numero = normalizar_numero(remote_jid)
+    # Autorização é checada pelo número de telefone real (resolvido do LID
+    # quando disponível). A resposta, porém, SEMPRE vai pro remote_jid
+    # original — trocar de endereço no meio da conversa quebra a sessão de
+    # criptografia do WhatsApp e a mensagem fica "Aguardando mensagem".
+    numero = normalizar_numero(numero_resolvido or remote_jid)
     numero_autorizado = buscar_numero_autorizado(conn, numero)
     if not numero_autorizado:
         await enviar_whatsapp(remote_jid, "❌ Número não autorizado. Fale com o administrador do sistema.")
