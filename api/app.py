@@ -254,8 +254,13 @@ async def chamar_groq_json(texto_usuario: str, groq_key: str) -> Optional[dict]:
                 continue
     return None
 
-async def enviar_whatsapp(numero: str, texto: str):
-    payload = {"number": numero, "message": texto}
+async def enviar_whatsapp(destino: str, texto: str):
+    # 'destino' pode ser um número puro (ex: "5511999998888") ou um JID completo
+    # (ex: "224713024491669@lid" ou "5511999998888@s.whatsapp.net"). O baileys
+    # só reconstrói "@s.whatsapp.net" quando não há "@" no valor — por isso é
+    # essencial repassar o JID original (com @lid) quando ele existir, em vez
+    # de normalizar para dígitos antes de responder.
+    payload = {"number": destino, "message": texto}
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             await client.post(f"{BAILEYS_URL}/disparar", json=payload)
@@ -707,16 +712,16 @@ async def webhook_mensagem(payload: dict, conn=Depends(get_db)):
     numero = normalizar_numero(remote_jid)
     numero_autorizado = buscar_numero_autorizado(conn, numero)
     if not numero_autorizado:
-        await enviar_whatsapp(numero, "❌ Número não autorizado. Fale com o administrador do sistema.")
+        await enviar_whatsapp(remote_jid, "❌ Número não autorizado. Fale com o administrador do sistema.")
         return {"ok": True}
 
     cliente = db_one(conn, "SELECT * FROM clientes WHERE id = %s AND ativo = TRUE", (numero_autorizado["cliente_id"],))
     if not cliente:
-        await enviar_whatsapp(numero, "❌ Conta inativa. Fale com o administrador.")
+        await enviar_whatsapp(remote_jid, "❌ Conta inativa. Fale com o administrador.")
         return {"ok": True}
 
     resposta = await processar_texto(conn, cliente, numero_autorizado, texto)
-    await enviar_whatsapp(numero, resposta)
+    await enviar_whatsapp(remote_jid, resposta)
     return {"ok": True}
 
 @app.get("/whatsapp/status")
