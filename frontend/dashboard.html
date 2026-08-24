@@ -790,6 +790,167 @@
                 alert('Erro: ' + err.message);
             }
         }
+
+        // ── MATÉRIA-PRIMA ──
+        function abrirModalMateriaPrima() {
+            document.getElementById('modalMateriaPrima').classList.add('show');
+        }
+
+        function fecharModalMateriaPrima() {
+            document.getElementById('modalMateriaPrima').classList.remove('show');
+            document.getElementById('nomeMP').value = '';
+            document.getElementById('skuMP').value = '';
+            document.getElementById('custoMP').value = '';
+            document.getElementById('estoqueMP').value = '';
+        }
+
+        async function salvarMateriaPrima() {
+            const nome = document.getElementById('nomeMP').value;
+            const sku = document.getElementById('skuMP').value;
+            const unidade = document.getElementById('unidadeMP').value;
+            const custo = parseFloat(document.getElementById('custoMP').value) || 0;
+            const estoque = parseFloat(document.getElementById('estoqueMP').value) || 0;
+
+            if (!nome) {
+                alert('Preencha o nome da matéria-prima');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/materias-primas`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        nome, sku, unidade, custo_unitario: custo, estoque_atual: estoque
+                    })
+                });
+
+                if (!res.ok) throw new Error('Erro ao salvar');
+
+                fecharModalMateriaPrima();
+                carregarMateriasPrimas();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        // ── RECEITA (ficha técnica) ──
+        async function abrirModalReceita(produtoId) {
+            const produto = produtos.find(p => p.id === produtoId);
+            if (!produto) return;
+
+            receitaProdutoId = produtoId;
+            document.getElementById('tituloReceita').textContent = `Receita de "${produto.nome}"`;
+
+            // garante que já temos a lista de matérias-primas pro select
+            if (materiasPrimas.length === 0) {
+                await carregarMateriasPrimas();
+            }
+            const select = document.getElementById('selectMateriaReceita');
+            select.innerHTML = materiasPrimas.map(m => `<option value="${m.id}">${m.nome} (${m.unidade})</option>`).join('');
+
+            try {
+                const res = await fetch(`${API_URL}/produtos/${produtoId}/receita`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Erro ao carregar receita');
+                const itens = await res.json();
+                receitaAtual = itens.map(i => ({
+                    materia_prima_id: i.materia_prima_id,
+                    nome: i.materia_prima_nome,
+                    unidade: i.unidade,
+                    quantidade_necessaria: parseFloat(i.quantidade_necessaria)
+                }));
+            } catch (err) {
+                console.error('Erro:', err);
+                receitaAtual = [];
+            }
+
+            renderReceitaItens();
+            document.getElementById('modalReceita').classList.add('show');
+        }
+
+        function fecharModalReceita() {
+            document.getElementById('modalReceita').classList.remove('show');
+            receitaAtual = [];
+            receitaProdutoId = null;
+        }
+
+        function renderReceitaItens() {
+            const div = document.getElementById('listaReceitaItens');
+            if (receitaAtual.length === 0) {
+                div.innerHTML = '<div class="subtext">Nenhuma matéria-prima adicionada ainda.</div>';
+                return;
+            }
+            div.innerHTML = receitaAtual.map(i => `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f0f0f0;">
+                    <div>${i.quantidade_necessaria} ${i.unidade} de <strong>${i.nome}</strong> por unidade</div>
+                    <button class="btn btn-secondary btn-small" onclick="removerItemReceita(${i.materia_prima_id})">Remover</button>
+                </div>
+            `).join('');
+        }
+
+        function adicionarItemReceita() {
+            const select = document.getElementById('selectMateriaReceita');
+            const materiaPrimaId = parseInt(select.value);
+            const quantidade = parseFloat(document.getElementById('qtdMateriaReceita').value);
+
+            if (!materiaPrimaId || !quantidade || quantidade <= 0) {
+                alert('Escolha a matéria-prima e informe uma quantidade válida');
+                return;
+            }
+
+            const materia = materiasPrimas.find(m => m.id === materiaPrimaId);
+            // se já existe na lista, atualiza a quantidade em vez de duplicar
+            const existente = receitaAtual.find(i => i.materia_prima_id === materiaPrimaId);
+            if (existente) {
+                existente.quantidade_necessaria = quantidade;
+            } else {
+                receitaAtual.push({
+                    materia_prima_id: materiaPrimaId,
+                    nome: materia.nome,
+                    unidade: materia.unidade,
+                    quantidade_necessaria: quantidade
+                });
+            }
+
+            document.getElementById('qtdMateriaReceita').value = '';
+            renderReceitaItens();
+        }
+
+        function removerItemReceita(materiaPrimaId) {
+            receitaAtual = receitaAtual.filter(i => i.materia_prima_id !== materiaPrimaId);
+            renderReceitaItens();
+        }
+
+        async function salvarReceita() {
+            if (!receitaProdutoId) return;
+            try {
+                const res = await fetch(`${API_URL}/produtos/${receitaProdutoId}/receita`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        itens: receitaAtual.map(i => ({
+                            materia_prima_id: i.materia_prima_id,
+                            quantidade_necessaria: i.quantidade_necessaria
+                        }))
+                    })
+                });
+
+                if (!res.ok) throw new Error('Erro ao salvar receita');
+
+                fecharModalReceita();
+                alert('Receita salva com sucesso!');
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
         
         function logout() {
             localStorage.clear();
