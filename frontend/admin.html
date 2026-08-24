@@ -414,7 +414,7 @@
         const adminToken = localStorage.getItem('admin_token');
 
         if (!adminToken) {
-            window.location.href = 'login.html';
+            window.location.href = 'admin-login.html';
         }
 
         function authHeaders(extra = {}) {
@@ -437,7 +437,7 @@
             if (res.status === 403 || res.status === 401) {
                 showToast('Sessão de admin expirada. Faça login novamente.', true);
                 localStorage.removeItem('admin_token');
-                setTimeout(() => window.location.href = 'login.html', 1500);
+                setTimeout(() => window.location.href = 'admin-login.html', 1500);
                 throw new Error('Não autorizado');
             }
             return res;
@@ -731,7 +731,7 @@
 
         function logout() {
             localStorage.clear();
-            window.location.href = 'login.html';
+            window.location.href = 'admin-login.html';
         }
 
         // Carregar tudo ao iniciar
