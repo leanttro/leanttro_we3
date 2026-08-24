@@ -45,7 +45,8 @@ MENU_TEXTO = (
     "5️⃣ Resumo do dia\n"
     "6️⃣ Cadastrar matéria-prima\n"
     "7️⃣ Montar receita de um produto\n"
-    "8️⃣ Cadastrar produto\n\n"
+    "8️⃣ Cadastrar produto\n"
+    "9️⃣ Visão geral do estoque\n\n"
     "Responda com o número da opção."
 )
 
@@ -167,6 +168,7 @@ class MateriaPrimaBody(BaseModel):
     custo_unitario: Optional[float] = 0
     estoque_atual: Optional[float] = 0
     unidade: Optional[str] = "un"
+    estoque_minimo: Optional[float] = None  # opcional — se None, não gera alerta
 
 class MovimentacaoMateriaPrimaBody(BaseModel):
     materia_prima_id: int
@@ -317,6 +319,7 @@ def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tip
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original))
 
+    alertas = []
     if tipo == "entrada":
         db_exec(conn, "UPDATE produtos SET estoque_atual = estoque_atual + %s, custo_unitario = %s WHERE id = %s",
                 (quantidade, valor_unitario, produto_id))
@@ -327,11 +330,11 @@ def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tip
         if tipo == "venda":
             # Toda venda de um produto que tem receita cadastrada desconta
             # automaticamente a matéria-prima usada (ficha técnica / BOM).
-            baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade, origem)
+            alertas = baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade, origem)
     elif tipo == "ajuste":
         db_exec(conn, "UPDATE produtos SET estoque_atual = %s WHERE id = %s", (quantidade, produto_id))
 
-    return valor_total
+    return valor_total, alertas
 
 # ─────────────────────────────────────────
 #  MATÉRIA-PRIMA / RECEITA (ficha técnica)
@@ -360,25 +363,40 @@ def aplicar_movimentacao_materia_prima(conn, cliente_id, materia_prima_id, numer
     elif tipo == "ajuste":
         db_exec(conn, "UPDATE materias_primas SET estoque_atual = %s WHERE id = %s", (quantidade, materia_prima_id))
 
-    return valor_total
+    # Alerta de estoque baixo — só dispara pra quem definiu um estoque mínimo
+    # (campo opcional; quem não usa a função simplesmente nunca recebe isso).
+    alerta = None
+    if tipo in ("saida", "baixa_receita"):
+        mp = db_one(conn, "SELECT nome, unidade, estoque_atual, estoque_minimo FROM materias_primas WHERE id = %s",
+                    (materia_prima_id,))
+        if mp and mp["estoque_minimo"] is not None and float(mp["estoque_atual"]) < float(mp["estoque_minimo"]):
+            alerta = (f"⚠️ *{mp['nome']}* está com {fmt_num(mp['estoque_atual'])} {mp['unidade']}, "
+                      f"abaixo do mínimo de {fmt_num(mp['estoque_minimo'])} {mp['unidade']}.")
+
+    return valor_total, alerta
 
 def baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade_vendida, origem):
     """Ao vender 1 ou mais unidades de um produto, desconta a matéria-prima
     de cada item da receita cadastrada, proporcionalmente à quantidade vendida.
-    Produtos sem receita cadastrada simplesmente não têm nenhum item aqui."""
+    Produtos sem receita cadastrada simplesmente não têm nenhum item aqui.
+    Retorna a lista de alertas de estoque baixo disparados (pode ser vazia)."""
     itens = db_all(conn, """
         SELECT r.materia_prima_id, r.quantidade_necessaria, m.custo_unitario
         FROM receita_itens r
         JOIN materias_primas m ON m.id = r.materia_prima_id
         WHERE r.produto_id = %s AND m.ativo = TRUE
     """, (produto_id,))
+    alertas = []
     for item in itens:
         qtd_baixa = round(float(item["quantidade_necessaria"]) * float(quantidade_vendida), 4)
-        aplicar_movimentacao_materia_prima(
+        _, alerta = aplicar_movimentacao_materia_prima(
             conn, cliente_id, item["materia_prima_id"], numero_autorizado_id,
             "baixa_receita", qtd_baixa, item["custo_unitario"],
             origem=origem, produto_id_origem=produto_id
         )
+        if alerta:
+            alertas.append(alerta)
+    return alertas
 
 # ─────────────────────────────────────────
 #  IA (GROQ) — extração estruturada
@@ -477,6 +495,9 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         if texto.strip() == "8":
             salvar_sessao(conn, numero_autorizado_id, "prod_nome", {})
             return "Qual o nome do novo produto?"
+
+        if texto.strip() == "9":
+            return gerar_visao_geral(conn, cliente["id"])
 
         if texto.strip() == "7":
             produtos = listar_produtos_cliente(conn, cliente["id"])
@@ -605,11 +626,27 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError:
             return "Manda só o número do estoque, por favor."
         dados["mp_estoque"] = estoque
+        salvar_sessao(conn, numero_autorizado_id, "mp_estoque_minimo", dados)
+        return (
+            "Quer receber um aviso quando essa matéria-prima ficar baixa? "
+            "Se sim, digite o estoque mínimo (ex: 1). Se não quiser usar isso, digite PULAR."
+        )
+
+    if etapa == "mp_estoque_minimo":
+        if texto_low == "pular":
+            dados["mp_estoque_minimo"] = None
+        else:
+            try:
+                dados["mp_estoque_minimo"] = float(texto.replace(",", "."))
+            except ValueError:
+                return "Manda só o número do estoque mínimo, ou digite PULAR pra não usar essa opção."
         salvar_sessao(conn, numero_autorizado_id, "confirmando_mp", dados)
+        linha_minimo = (f" | alerta abaixo de {fmt_num(dados['mp_estoque_minimo'])}"
+                         if dados.get("mp_estoque_minimo") is not None else "")
         return (
             f"Confirma o cadastro?\n"
             f"*{dados['mp_nome']}* | {dados['mp_unidade']} | custo R$ {dados['mp_custo']:.2f} | "
-            f"estoque inicial {estoque}\n\nResponda SIM ou NÃO."
+            f"estoque inicial {fmt_num(dados['mp_estoque'])}{linha_minimo}\n\nResponda SIM ou NÃO."
         )
 
     if etapa == "confirmando_mp":
@@ -619,9 +656,10 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if existente:
                 return f"⚠️ Já existe uma matéria-prima chamada '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu()
             db_exec(conn, """
-                INSERT INTO materias_primas (cliente_id, nome, unidade, custo_unitario, estoque_atual)
-                VALUES (%s,%s,%s,%s,%s)
-            """, (cliente["id"], dados["mp_nome"], dados["mp_unidade"], dados["mp_custo"], dados["mp_estoque"]))
+                INSERT INTO materias_primas (cliente_id, nome, unidade, custo_unitario, estoque_atual, estoque_minimo)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (cliente["id"], dados["mp_nome"], dados["mp_unidade"], dados["mp_custo"], dados["mp_estoque"],
+                  dados.get("mp_estoque_minimo")))
             return "✅ Matéria-prima cadastrada com sucesso!\n\n" + resposta_menu()
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
@@ -663,25 +701,61 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError:
             return "Manda só o número do estoque, por favor."
         dados["prod_estoque"] = estoque
-        salvar_sessao(conn, numero_autorizado_id, "confirmando_cadastro_produto", dados)
+        salvar_sessao(conn, numero_autorizado_id, "prod_quer_receita", dados)
+        return (
+            "Esse produto usa alguma matéria-prima na receita (ex: farinha, embalagem)? "
+            "Se sim, a matéria-prima é descontada sozinha a cada venda. Responda SIM ou NÃO."
+        )
+
+    if etapa == "prod_quer_receita":
+        if texto_low in ("sim", "s"):
+            dados["prod_quer_receita"] = True
+        elif texto_low in ("não", "nao", "n"):
+            dados["prod_quer_receita"] = False
+        else:
+            return "Responda SIM ou NÃO."
+        salvar_sessao(conn, numero_autorizado_id, "produto_aguardando_confirmacao", dados)
         return (
             f"Confirma o cadastro?\n"
             f"*{dados['prod_nome']}* | {dados['prod_unidade']} | custo R$ {dados['prod_custo']:.2f} | "
-            f"venda R$ {dados['prod_preco']:.2f} | estoque inicial {fmt_num(estoque)}\n\nResponda SIM ou NÃO."
+            f"venda R$ {dados['prod_preco']:.2f} | estoque inicial {fmt_num(dados['prod_estoque'])}"
+            f"\n\nResponda SIM ou NÃO."
         )
 
-    if etapa == "confirmando_cadastro_produto":
+    if etapa == "produto_aguardando_confirmacao":
         if texto_low in ("sim", "s", "confirmo", "confirmar"):
             existente = buscar_produto_por_nome(conn, cliente["id"], dados["prod_nome"])
-            salvar_sessao(conn, numero_autorizado_id, "menu", {})
             if existente:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return f"⚠️ Já existe um produto chamado '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu()
-            db_exec(conn, """
+            produto_novo = db_exec(conn, """
                 INSERT INTO produtos (cliente_id, nome, unidade, custo_unitario, preco_venda, estoque_atual)
-                VALUES (%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s) RETURNING *
             """, (cliente["id"], dados["prod_nome"], dados["prod_unidade"], dados["prod_custo"],
                   dados["prod_preco"], dados["prod_estoque"]))
-            return "✅ Produto cadastrado com sucesso!\n\n" + resposta_menu()
+
+            if not dados.get("prod_quer_receita"):
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return "✅ Produto cadastrado com sucesso!\n\n" + resposta_menu()
+
+            # Quis vincular receita — encadeia direto no mesmo fluxo da opção 7,
+            # já com o produto recém-criado.
+            materias = listar_materias_primas_cliente(conn, cliente["id"])
+            if not materias:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("✅ Produto cadastrado com sucesso!\n\n"
+                        "Só que você ainda não tem matéria-prima cadastrada. Cadastre uma (opção 6) "
+                        "e depois monte a receita pela opção 7.\n\n") + resposta_menu()
+
+            dados_receita = {
+                "receita_produto_id": produto_novo["id"], "receita_produto_nome": produto_novo["nome"],
+                "receita_itens": [], "materias_ids": [m["id"] for m in materias],
+            }
+            salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados_receita)
+            return "✅ Produto cadastrado! Agora vamos montar a receita.\n\n" + montar_lista_numerada(
+                materias, f"Qual matéria-prima entra em *{produto_novo['nome']}*?",
+                rodape="Responda com o número, ou digite PRONTO quando terminar."
+            )
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return "Cancelado.\n\n" + resposta_menu()
@@ -777,22 +851,28 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         if texto_low in ("sim", "s", "confirmo", "confirmar"):
             tipo = dados.get("tipo")
             carrinho = dados.get("carrinho")
+            todos_alertas = []
             if carrinho:
                 for item in carrinho:
-                    aplicar_movimentacao(
+                    _, alertas_item = aplicar_movimentacao(
                         conn, cliente["id"], item["produto_id"], numero_autorizado_id,
                         tipo, item["quantidade"], item.get("valor_unitario", 0),
                         origem="formulario", mensagem_original=texto
                     )
+                    todos_alertas.extend(alertas_item)
             else:
                 # compatibilidade com o modo IA, que ainda manda um único item
-                aplicar_movimentacao(
+                _, alertas_item = aplicar_movimentacao(
                     conn, cliente["id"], dados["produto_id"], numero_autorizado_id,
                     tipo, dados["quantidade"], dados.get("valor_unitario", 0),
                     origem="formulario", mensagem_original=texto
                 )
+                todos_alertas.extend(alertas_item)
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "✅ Registrado com sucesso!\n\n" + resposta_menu()
+            resposta = "✅ Registrado com sucesso!"
+            if todos_alertas:
+                resposta += "\n\n" + "\n".join(todos_alertas)
+            return resposta + "\n\n" + resposta_menu()
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return "Cancelado.\n\n" + resposta_menu()
@@ -827,6 +907,38 @@ async def preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido,
         f"Confirma?\n{acao} {fmt_num(dados['quantidade'])} × *{produto['nome']}* "
         f"a R$ {dados['valor_unitario']:.2f} (total R$ {total:.2f})\n\nResponda SIM ou NÃO."
     )
+
+def gerar_visao_geral(conn, cliente_id: int) -> str:
+    """Lista todos os produtos e matérias-primas com o estoque atual,
+    sinalizando com ⚠️ quem tem estoque mínimo definido e já ficou abaixo dele."""
+    produtos = db_all(conn, """
+        SELECT nome, unidade, estoque_atual FROM produtos
+        WHERE cliente_id = %s AND ativo = TRUE ORDER BY nome
+    """, (cliente_id,))
+    materias = db_all(conn, """
+        SELECT nome, unidade, estoque_atual, estoque_minimo FROM materias_primas
+        WHERE cliente_id = %s AND ativo = TRUE ORDER BY nome
+    """, (cliente_id,))
+
+    blocos = ["📊 *Visão geral do estoque*"]
+
+    blocos.append("\n📦 *Produtos*")
+    if produtos:
+        for p in produtos:
+            blocos.append(f"- {p['nome']}: {fmt_num(p['estoque_atual'])} {p['unidade']}")
+    else:
+        blocos.append("Nenhum produto cadastrado ainda.")
+
+    blocos.append("\n🧂 *Matérias-primas*")
+    if materias:
+        for m in materias:
+            abaixo = m["estoque_minimo"] is not None and float(m["estoque_atual"]) < float(m["estoque_minimo"])
+            marca = "⚠️ " if abaixo else "- "
+            blocos.append(f"{marca}{m['nome']}: {fmt_num(m['estoque_atual'])} {m['unidade']}")
+    else:
+        blocos.append("Nenhuma matéria-prima cadastrada ainda.")
+
+    return "\n".join(blocos) + "\n\n" + resposta_menu()
 
 async def gerar_resumo_dia(conn, cliente_id: int) -> str:
     hoje = datetime.utcnow().date()
@@ -1027,16 +1139,17 @@ def listar_materias_primas(cliente=Depends(get_current_cliente), conn=Depends(ge
 @app.post("/materias-primas")
 def criar_materia_prima(body: MateriaPrimaBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
     return db_exec(conn, """
-        INSERT INTO materias_primas (cliente_id, nome, sku, custo_unitario, estoque_atual, unidade)
-        VALUES (%s,%s,%s,%s,%s,%s) RETURNING *
-    """, (cliente["id"], body.nome, body.sku, body.custo_unitario, body.estoque_atual, body.unidade))
+        INSERT INTO materias_primas (cliente_id, nome, sku, custo_unitario, estoque_atual, unidade, estoque_minimo)
+        VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *
+    """, (cliente["id"], body.nome, body.sku, body.custo_unitario, body.estoque_atual, body.unidade, body.estoque_minimo))
 
 @app.put("/materias-primas/{materia_id}")
 def atualizar_materia_prima(materia_id: int, body: MateriaPrimaBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
     db_exec(conn, """
-        UPDATE materias_primas SET nome=%s, sku=%s, custo_unitario=%s, estoque_atual=%s, unidade=%s
+        UPDATE materias_primas SET nome=%s, sku=%s, custo_unitario=%s, estoque_atual=%s, unidade=%s, estoque_minimo=%s
         WHERE id=%s AND cliente_id=%s
-    """, (body.nome, body.sku, body.custo_unitario, body.estoque_atual, body.unidade, materia_id, cliente["id"]))
+    """, (body.nome, body.sku, body.custo_unitario, body.estoque_atual, body.unidade, body.estoque_minimo,
+          materia_id, cliente["id"]))
     return {"ok": True}
 
 @app.delete("/materias-primas/{materia_id}")
@@ -1051,9 +1164,9 @@ def criar_movimentacao_materia_prima_manual(body: MovimentacaoMateriaPrimaBody, 
                       (body.materia_prima_id, cliente["id"]))
     if not materia:
         raise HTTPException(status_code=404, detail="Matéria-prima não encontrada")
-    aplicar_movimentacao_materia_prima(conn, cliente["id"], body.materia_prima_id, None, body.tipo,
-                                        body.quantidade, body.valor_unitario, origem="manual_painel")
-    return {"ok": True}
+    _, alerta = aplicar_movimentacao_materia_prima(conn, cliente["id"], body.materia_prima_id, None, body.tipo,
+                                                    body.quantidade, body.valor_unitario, origem="manual_painel")
+    return {"ok": True, "alerta": alerta}
 
 @app.get("/movimentacoes-materia-prima")
 def listar_movimentacoes_materia_prima(
@@ -1148,9 +1261,9 @@ def criar_movimentacao_manual(body: MovimentacaoManualBody, cliente=Depends(get_
     produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s", (body.produto_id, cliente["id"]))
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
-    aplicar_movimentacao(conn, cliente["id"], body.produto_id, None, body.tipo, body.quantidade,
-                          body.valor_unitario, origem="manual_admin")
-    return {"ok": True}
+    _, alertas = aplicar_movimentacao(conn, cliente["id"], body.produto_id, None, body.tipo, body.quantidade,
+                                       body.valor_unitario, origem="manual_admin")
+    return {"ok": True, "alertas": alertas}
 
 @app.get("/dashboard/resumo")
 def dashboard_resumo(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
