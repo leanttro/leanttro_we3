@@ -44,7 +44,8 @@ MENU_TEXTO = (
     "4️⃣ Ajuste manual\n"
     "5️⃣ Resumo do dia\n"
     "6️⃣ Cadastrar matéria-prima\n"
-    "7️⃣ Montar receita de um produto\n\n"
+    "7️⃣ Montar receita de um produto\n"
+    "8️⃣ Cadastrar produto\n\n"
     "Responda com o número da opção."
 )
 
@@ -473,6 +474,10 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "mp_nome", {})
             return "Qual o nome da nova matéria-prima?"
 
+        if texto.strip() == "8":
+            salvar_sessao(conn, numero_autorizado_id, "prod_nome", {})
+            return "Qual o nome do novo produto?"
+
         if texto.strip() == "7":
             produtos = listar_produtos_cliente(conn, cliente["id"])
             if not produtos:
@@ -618,6 +623,65 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                 VALUES (%s,%s,%s,%s,%s)
             """, (cliente["id"], dados["mp_nome"], dados["mp_unidade"], dados["mp_custo"], dados["mp_estoque"]))
             return "✅ Matéria-prima cadastrada com sucesso!\n\n" + resposta_menu()
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Cancelado.\n\n" + resposta_menu()
+        return "Responda SIM ou NÃO."
+
+    # ── ETAPA: cadastro de produto (opção 8) ──
+    if etapa == "prod_nome":
+        dados["prod_nome"] = texto.strip()
+        salvar_sessao(conn, numero_autorizado_id, "prod_unidade", dados)
+        return "Qual a unidade de medida? (ex: un, kg, l) — ou digite PULAR para usar 'un'"
+
+    if etapa == "prod_unidade":
+        dados["prod_unidade"] = texto.strip() if texto_low != "pular" else "un"
+        salvar_sessao(conn, numero_autorizado_id, "prod_custo", dados)
+        return "Qual o custo unitário (R$)? — digite 0 se ainda não souber"
+
+    if etapa == "prod_custo":
+        try:
+            custo = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do custo, por favor."
+        dados["prod_custo"] = custo
+        salvar_sessao(conn, numero_autorizado_id, "prod_preco", dados)
+        return "Qual o valor de venda (R$)? — digite 0 se ainda não souber"
+
+    if etapa == "prod_preco":
+        try:
+            preco = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do valor de venda, por favor."
+        dados["prod_preco"] = preco
+        salvar_sessao(conn, numero_autorizado_id, "prod_estoque", dados)
+        return "Qual o estoque inicial desse produto?"
+
+    if etapa == "prod_estoque":
+        try:
+            estoque = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do estoque, por favor."
+        dados["prod_estoque"] = estoque
+        salvar_sessao(conn, numero_autorizado_id, "confirmando_produto", dados)
+        return (
+            f"Confirma o cadastro?\n"
+            f"*{dados['prod_nome']}* | {dados['prod_unidade']} | custo R$ {dados['prod_custo']:.2f} | "
+            f"venda R$ {dados['prod_preco']:.2f} | estoque inicial {fmt_num(estoque)}\n\nResponda SIM ou NÃO."
+        )
+
+    if etapa == "confirmando_produto":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            existente = buscar_produto_por_nome(conn, cliente["id"], dados["prod_nome"])
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            if existente:
+                return f"⚠️ Já existe um produto chamado '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu()
+            db_exec(conn, """
+                INSERT INTO produtos (cliente_id, nome, unidade, custo_unitario, preco_venda, estoque_atual)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (cliente["id"], dados["prod_nome"], dados["prod_unidade"], dados["prod_custo"],
+                  dados["prod_preco"], dados["prod_estoque"]))
+            return "✅ Produto cadastrado com sucesso!\n\n" + resposta_menu()
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return "Cancelado.\n\n" + resposta_menu()
