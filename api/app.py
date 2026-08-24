@@ -220,6 +220,39 @@ def buscar_materia_prima_por_nome(conn, cliente_id: int, nome: str):
         ORDER BY id LIMIT 1
     """, (cliente_id, f"%{nome.strip()}%"))
 
+def fmt_num(valor) -> str:
+    """Formata um número (Decimal ou float) sem casas decimais falsas
+    (ex: evita mostrar '2.000' quando é só o número 2, o que em pt-BR
+    é lido como 'dois mil'). Usa vírgula como separador decimal."""
+    v = float(valor or 0)
+    if v == int(v):
+        texto = str(int(v))
+    else:
+        texto = f"{v:.3f}".rstrip("0").rstrip(".")
+    return texto.replace(".", ",")
+
+def listar_produtos_cliente(conn, cliente_id: int):
+    return db_all(conn, """
+        SELECT id, nome FROM produtos
+        WHERE cliente_id = %s AND ativo = TRUE
+        ORDER BY nome
+    """, (cliente_id,))
+
+def listar_materias_primas_cliente(conn, cliente_id: int):
+    return db_all(conn, """
+        SELECT id, nome, unidade FROM materias_primas
+        WHERE cliente_id = %s AND ativo = TRUE
+        ORDER BY nome
+    """, (cliente_id,))
+
+def montar_lista_numerada(itens, titulo: str, rodape: str = "Responda com o número.") -> str:
+    linhas = [titulo, ""]
+    for i, item in enumerate(itens, start=1):
+        linhas.append(f"{i}. {item['nome']}")
+    linhas.append("")
+    linhas.append(rodape)
+    return "\n".join(linhas)
+
 def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, origem, mensagem_original=None):
     quantidade = float(quantidade)
     valor_unitario = float(valor_unitario or 0)
@@ -368,27 +401,34 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     # ── ETAPA: MENU ──
     if etapa == "menu":
-        opcoes = {
-            "1": ("entrada", "Qual produto? (nome)"),
-            "2": ("venda", "Qual produto? (nome)"),
-            "3": ("consulta", "Qual produto você quer consultar?"),
-            "4": ("ajuste", "Qual produto? (nome)"),
-            "5": ("resumo", None),
-        }
+        opcoes = {"1": "entrada", "2": "venda", "3": "consulta", "4": "ajuste"}
         if texto.strip() in opcoes:
-            tipo, pergunta = opcoes[texto.strip()]
-            if tipo == "resumo":
-                return await gerar_resumo_dia(conn, cliente["id"])
-            salvar_sessao(conn, numero_autorizado_id, f"{tipo}_produto", {"tipo": tipo})
-            return pergunta
+            tipo = opcoes[texto.strip()]
+            produtos = listar_produtos_cliente(conn, cliente["id"])
+            if not produtos:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("Você ainda não tem nenhum produto cadastrado. "
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+            dados = {"tipo": tipo, "produtos_ids": [p["id"] for p in produtos]}
+            salvar_sessao(conn, numero_autorizado_id, f"{tipo}_produto", dados)
+            return montar_lista_numerada(produtos, "Qual produto?")
+
+        if texto.strip() == "5":
+            return await gerar_resumo_dia(conn, cliente["id"])
 
         if texto.strip() == "6":
             salvar_sessao(conn, numero_autorizado_id, "mp_nome", {})
             return "Qual o nome da nova matéria-prima?"
 
         if texto.strip() == "7":
-            salvar_sessao(conn, numero_autorizado_id, "receita_produto_nome", {})
-            return "De qual produto você quer montar/editar a receita? (nome)"
+            produtos = listar_produtos_cliente(conn, cliente["id"])
+            if not produtos:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("Você ainda não tem nenhum produto cadastrado. "
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+            dados = {"produtos_ids": [p["id"] for p in produtos]}
+            salvar_sessao(conn, numero_autorizado_id, "receita_produto_escolha", dados)
+            return montar_lista_numerada(produtos, "De qual produto você quer montar/editar a receita?")
 
         # modo IA: tenta extrair da mensagem livre antes de cair no menu
         if cliente["plano"] == "ia":
@@ -398,26 +438,29 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
         return "Não entendi 🤔\n\n" + resposta_menu()
 
-    # ── ETAPA: pedindo nome do produto ──
+    # ── ETAPA: escolhendo o produto da lista numerada ──
     if etapa.endswith("_produto"):
         tipo = dados.get("tipo")
-        if tipo == "consulta":
-            produto = buscar_produto_por_nome(conn, cliente["id"], texto)
+        produtos_ids = dados.get("produtos_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(produtos_ids)
+        except (ValueError, AssertionError):
+            return f"Manda só o número do produto (1 a {len(produtos_ids)})."
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (produtos_ids[idx - 1],))
+        if not produto:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            if not produto:
-                return f"Produto '{texto}' não encontrado.\n\n" + resposta_menu()
+            return "Esse produto não existe mais.\n\n" + resposta_menu()
+
+        if tipo == "consulta":
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return (
                 f"📦 *{produto['nome']}*\n"
-                f"Estoque atual: {produto['estoque_atual']} {produto['unidade']}\n"
+                f"Estoque atual: {fmt_num(produto['estoque_atual'])} {produto['unidade']}\n"
                 f"Custo: R$ {produto['custo_unitario']:.2f}\n"
                 f"Preço de venda: R$ {produto['preco_venda']:.2f}\n\n"
             ) + resposta_menu()
 
-        produto = buscar_produto_por_nome(conn, cliente["id"], texto)
-        if not produto:
-            produto = db_exec(conn, """
-                INSERT INTO produtos (cliente_id, nome) VALUES (%s, %s) RETURNING *
-            """, (cliente["id"], texto.strip()))
         dados["produto_id"] = produto["id"]
         dados["produto_nome"] = produto["nome"]
         salvar_sessao(conn, numero_autorizado_id, f"{tipo}_quantidade", dados)
@@ -435,7 +478,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
             return (
                 f"Confirma o ajuste de estoque de *{dados['produto_nome']}* para "
-                f"{quantidade}? Responda SIM ou NÃO."
+                f"{fmt_num(quantidade)}? Responda SIM ou NÃO."
             )
         salvar_sessao(conn, numero_autorizado_id, f"{tipo}_valor", dados)
         rotulo = "custo unitário (R$)" if tipo == "entrada" else "valor unitário de venda (R$)"
@@ -455,7 +498,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         acao = {"entrada": "Entrada de", "venda": "Venda de", "saida": "Saída de"}[tipo]
         return (
             f"Confirma?\n"
-            f"{acao} {dados['quantidade']} × *{dados['produto_nome']}* a R$ {valor:.2f} "
+            f"{acao} {fmt_num(dados['quantidade'])} × *{dados['produto_nome']}* a R$ {valor:.2f} "
             f"(total R$ {total:.2f})\n\nResponda SIM ou NÃO."
         )
 
@@ -509,29 +552,51 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         return "Responda SIM ou NÃO."
 
     # ── ETAPA: montar receita de um produto (opção 7) ──
-    if etapa == "receita_produto_nome":
-        produto = buscar_produto_por_nome(conn, cliente["id"], texto)
+    if etapa == "receita_produto_escolha":
+        produtos_ids = dados.get("produtos_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(produtos_ids)
+        except (ValueError, AssertionError):
+            return f"Manda só o número do produto (1 a {len(produtos_ids)})."
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (produtos_ids[idx - 1],))
         if not produto:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return f"Produto '{texto}' não encontrado. Cadastre o produto primeiro (opção 1) ou confira o nome.\n\n" + resposta_menu()
-        dados = {"receita_produto_id": produto["id"], "receita_produto_nome": produto["nome"], "receita_itens": []}
-        salvar_sessao(conn, numero_autorizado_id, "receita_item_nome", dados)
-        return (
-            f"Montando a receita de *{produto['nome']}*.\n"
-            f"Qual matéria-prima entra nela? (nome) — quando terminar, digite PRONTO"
+            return "Esse produto não existe mais.\n\n" + resposta_menu()
+
+        materias = listar_materias_primas_cliente(conn, cliente["id"])
+        if not materias:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Você ainda não tem matéria-prima cadastrada. Cadastre uma primeiro (opção 6).\n\n" + resposta_menu()
+
+        dados = {
+            "receita_produto_id": produto["id"], "receita_produto_nome": produto["nome"],
+            "receita_itens": [], "materias_ids": [m["id"] for m in materias],
+        }
+        salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
+        return montar_lista_numerada(
+            materias, f"Montando a receita de *{produto['nome']}*.\nQual matéria-prima entra nela?",
+            rodape="Responda com o número, ou digite PRONTO quando terminar."
         )
 
-    if etapa == "receita_item_nome":
+    if etapa == "receita_item_escolha":
         if texto_low == "pronto":
             if not dados.get("receita_itens"):
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return "Nenhum item adicionado. Receita cancelada.\n\n" + resposta_menu()
             salvar_sessao(conn, numero_autorizado_id, "confirmando_receita", dados)
-            linhas = "\n".join(f"- {i['quantidade']} {i['unidade']} de {i['nome']}" for i in dados["receita_itens"])
+            linhas = "\n".join(f"- {fmt_num(i['quantidade'])} {i['unidade']} de {i['nome']}" for i in dados["receita_itens"])
             return f"Confirma a receita de *{dados['receita_produto_nome']}*?\n{linhas}\n\nResponda SIM ou NÃO."
-        materia = buscar_materia_prima_por_nome(conn, cliente["id"], texto)
+
+        materias_ids = dados.get("materias_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(materias_ids)
+        except (ValueError, AssertionError):
+            return f"Manda só o número da matéria-prima (1 a {len(materias_ids)}), ou PRONTO para terminar."
+        materia = db_one(conn, "SELECT * FROM materias_primas WHERE id = %s", (materias_ids[idx - 1],))
         if not materia:
-            return f"Matéria-prima '{texto}' não encontrada. Cadastre primeiro (opção 6), tente outro nome, ou digite PRONTO."
+            return "Essa matéria-prima não existe mais. Escolha outro número ou digite PRONTO."
         dados["receita_item_atual"] = {"id": materia["id"], "nome": materia["nome"], "unidade": materia["unidade"]}
         salvar_sessao(conn, numero_autorizado_id, "receita_item_qtd", dados)
         return f"Quantos {materia['unidade']} de *{materia['nome']}* vão em 1 unidade do produto?"
@@ -546,8 +611,14 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             "materia_prima_id": item["id"], "nome": item["nome"], "unidade": item["unidade"], "quantidade": quantidade
         })
         dados.pop("receita_item_atual", None)
-        salvar_sessao(conn, numero_autorizado_id, "receita_item_nome", dados)
-        return "Adicionado! Mais alguma matéria-prima? (nome) — ou digite PRONTO para terminar"
+        salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
+        materias = listar_materias_primas_cliente(conn, cliente["id"])
+        dados["materias_ids"] = [m["id"] for m in materias]
+        salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
+        return montar_lista_numerada(
+            materias, "Adicionado! Mais alguma matéria-prima?",
+            rodape="Responda com o número, ou digite PRONTO para terminar."
+        )
 
     if etapa == "confirmando_receita":
         if texto_low in ("sim", "s", "confirmo", "confirmar"):
@@ -607,7 +678,7 @@ async def preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido,
     total = round(dados["quantidade"] * dados["valor_unitario"], 2)
     acao = {"entrada": "Entrada de", "venda": "Venda de", "saida": "Saída de"}[tipo]
     return (
-        f"Confirma?\n{acao} {dados['quantidade']} × *{produto['nome']}* "
+        f"Confirma?\n{acao} {fmt_num(dados['quantidade'])} × *{produto['nome']}* "
         f"a R$ {dados['valor_unitario']:.2f} (total R$ {total:.2f})\n\nResponda SIM ou NÃO."
     )
 
@@ -623,7 +694,7 @@ async def gerar_resumo_dia(conn, cliente_id: int) -> str:
         return f"📊 Nenhuma movimentação hoje ({hoje.strftime('%d/%m')}).\n\n" + resposta_menu()
     txt = f"📊 *Resumo de hoje ({hoje.strftime('%d/%m')})*\n"
     for l in linhas:
-        txt += f"- {l['tipo'].capitalize()}: {l['qtd']} un | R$ {l['total']:.2f}\n"
+        txt += f"- {l['tipo'].capitalize()}: {fmt_num(l['qtd'])} un | R$ {float(l['total']):.2f}\n"
     return txt + "\n" + resposta_menu()
 
 # ─────────────────────────────────────────
