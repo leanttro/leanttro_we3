@@ -663,14 +663,14 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError:
             return "Manda só o número do estoque, por favor."
         dados["prod_estoque"] = estoque
-        salvar_sessao(conn, numero_autorizado_id, "confirmando_produto", dados)
+        salvar_sessao(conn, numero_autorizado_id, "confirmando_cadastro_produto", dados)
         return (
             f"Confirma o cadastro?\n"
             f"*{dados['prod_nome']}* | {dados['prod_unidade']} | custo R$ {dados['prod_custo']:.2f} | "
             f"venda R$ {dados['prod_preco']:.2f} | estoque inicial {fmt_num(estoque)}\n\nResponda SIM ou NÃO."
         )
 
-    if etapa == "confirmando_produto":
+    if etapa == "confirmando_cadastro_produto":
         if texto_low in ("sim", "s", "confirmo", "confirmar"):
             existente = buscar_produto_por_nome(conn, cliente["id"], dados["prod_nome"])
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
