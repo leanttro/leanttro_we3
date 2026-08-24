@@ -253,6 +253,58 @@ def montar_lista_numerada(itens, titulo: str, rodape: str = "Responda com o núm
     linhas.append(rodape)
     return "\n".join(linhas)
 
+def parse_selecao_multipla(texto: str, max_idx: int):
+    """Aceita '1' ou '1,3,5' ou '1 3 5' e devolve a lista de índices (1-based)
+    válidos, sem repetir, na ordem digitada. Retorna None se algo for inválido."""
+    partes = re.split(r"[,\s]+", texto.strip())
+    indices = []
+    for p in partes:
+        if not p:
+            continue
+        if not p.isdigit():
+            return None
+        idx = int(p)
+        if idx < 1 or idx > max_idx:
+            return None
+        if idx not in indices:
+            indices.append(idx)
+    return indices or None
+
+def avancar_fila_ou_confirmar(conn, numero_autorizado_id: int, dados: dict, tipo: str) -> str:
+    """Chamado depois que um item do carrinho (produto + quantidade [+ valor])
+    foi completado. Se ainda sobra produto na fila, pergunta a quantidade do
+    próximo; se não sobra mais nada, monta o resumo do carrinho inteiro pra
+    confirmação (SIM/NÃO)."""
+    fila = dados.get("fila_produtos_ids", [])
+    if fila:
+        proximo_id = fila.pop(0)
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (proximo_id,))
+        dados["fila_produtos_ids"] = fila
+        dados["produto_id"] = produto["id"]
+        dados["produto_nome"] = produto["nome"]
+        salvar_sessao(conn, numero_autorizado_id, f"{tipo}_quantidade", dados)
+        return f"Quantidade de *{produto['nome']}*?"
+
+    salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
+    carrinho = dados.get("carrinho", [])
+    linhas = []
+    total_geral = 0.0
+    for item in carrinho:
+        if tipo == "ajuste":
+            linhas.append(f"- {item['produto_nome']} → {fmt_num(item['quantidade'])}")
+        else:
+            item_total = round(item["quantidade"] * item["valor_unitario"], 2)
+            total_geral += item_total
+            linhas.append(
+                f"- {fmt_num(item['quantidade'])} × {item['produto_nome']} "
+                f"a R$ {item['valor_unitario']:.2f} (R$ {item_total:.2f})"
+            )
+    corpo = "\n".join(linhas)
+    acao = {"entrada": "a entrada", "venda": "a venda", "saida": "a saída", "ajuste": "os ajustes"}[tipo]
+    if tipo == "ajuste":
+        return f"Confirma {acao}?\n{corpo}\n\nResponda SIM ou NÃO."
+    return f"Confirma {acao}?\n{corpo}\n\nTotal: R$ {total_geral:.2f}\n\nResponda SIM ou NÃO."
+
 def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, origem, mensagem_original=None):
     quantidade = float(quantidade)
     valor_unitario = float(valor_unitario or 0)
@@ -411,7 +463,8 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                         "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
             dados = {"tipo": tipo, "produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, f"{tipo}_produto", dados)
-            return montar_lista_numerada(produtos, "Qual produto?")
+            rodape = "Responda com o número. Pra mais de um produto, separe por vírgula (ex: 1,3,5)."
+            return montar_lista_numerada(produtos, "Qual produto?", rodape=rodape)
 
         if texto.strip() == "5":
             return await gerar_resumo_dia(conn, cliente["id"])
@@ -438,35 +491,41 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
         return "Não entendi 🤔\n\n" + resposta_menu()
 
-    # ── ETAPA: escolhendo o produto da lista numerada ──
+    # ── ETAPA: escolhendo o(s) produto(s) da lista numerada ──
     if etapa.endswith("_produto"):
         tipo = dados.get("tipo")
         produtos_ids = dados.get("produtos_ids", [])
-        try:
-            idx = int(texto.strip())
-            assert 1 <= idx <= len(produtos_ids)
-        except (ValueError, AssertionError):
-            return f"Manda só o número do produto (1 a {len(produtos_ids)})."
-        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (produtos_ids[idx - 1],))
-        if not produto:
-            salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Esse produto não existe mais.\n\n" + resposta_menu()
+        indices = parse_selecao_multipla(texto, len(produtos_ids))
+        if not indices:
+            return (f"Manda o número do produto (1 a {len(produtos_ids)}). "
+                     "Pra mais de um, separe por vírgula, ex: 1,3.")
+        escolhidos_ids = [produtos_ids[i - 1] for i in indices]
 
         if tipo == "consulta":
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return (
-                f"📦 *{produto['nome']}*\n"
-                f"Estoque atual: {fmt_num(produto['estoque_atual'])} {produto['unidade']}\n"
-                f"Custo: R$ {produto['custo_unitario']:.2f}\n"
-                f"Preço de venda: R$ {produto['preco_venda']:.2f}\n\n"
-            ) + resposta_menu()
+            blocos = []
+            for pid in escolhidos_ids:
+                produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (pid,))
+                if not produto:
+                    continue
+                blocos.append(
+                    f"📦 *{produto['nome']}*\n"
+                    f"Estoque atual: {fmt_num(produto['estoque_atual'])} {produto['unidade']}\n"
+                    f"Custo: R$ {produto['custo_unitario']:.2f}\n"
+                    f"Preço de venda: R$ {produto['preco_venda']:.2f}"
+                )
+            return "\n\n".join(blocos) + "\n\n" + resposta_menu()
 
-        dados["produto_id"] = produto["id"]
-        dados["produto_nome"] = produto["nome"]
+        # entrada / venda / ajuste: monta a fila e processa item por item
+        primeiro = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (escolhidos_ids[0],))
+        dados["fila_produtos_ids"] = escolhidos_ids[1:]
+        dados["carrinho"] = []
+        dados["produto_id"] = primeiro["id"]
+        dados["produto_nome"] = primeiro["nome"]
         salvar_sessao(conn, numero_autorizado_id, f"{tipo}_quantidade", dados)
-        return f"Quantidade de *{produto['nome']}*?"
+        return f"Quantidade de *{primeiro['nome']}*?"
 
-    # ── ETAPA: pedindo quantidade ──
+    # ── ETAPA: pedindo quantidade (de um item do carrinho) ──
     if etapa.endswith("_quantidade"):
         tipo = dados.get("tipo")
         try:
@@ -474,33 +533,46 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError:
             return "Manda só o número da quantidade, por favor."
         dados["quantidade"] = quantidade
-        if tipo == "ajuste":
-            salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
-            return (
-                f"Confirma o ajuste de estoque de *{dados['produto_nome']}* para "
-                f"{fmt_num(quantidade)}? Responda SIM ou NÃO."
-            )
-        salvar_sessao(conn, numero_autorizado_id, f"{tipo}_valor", dados)
-        rotulo = "custo unitário (R$)" if tipo == "entrada" else "valor unitário de venda (R$)"
-        return f"Qual o {rotulo}?"
 
-    # ── ETAPA: pedindo valor ──
+        if tipo == "ajuste":
+            dados.setdefault("carrinho", []).append({
+                "produto_id": dados["produto_id"], "produto_nome": dados["produto_nome"],
+                "quantidade": quantidade, "valor_unitario": 0,
+            })
+            return avancar_fila_ou_confirmar(conn, numero_autorizado_id, dados, tipo)
+
+        # entrada / venda: sugere o valor já cadastrado no produto
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (dados["produto_id"],))
+        valor_sugerido = float((produto["custo_unitario"] if tipo == "entrada" else produto["preco_venda"]) or 0)
+        dados["valor_sugerido"] = valor_sugerido
+        salvar_sessao(conn, numero_autorizado_id, f"{tipo}_valor", dados)
+        rotulo = "custo unitário" if tipo == "entrada" else "valor unitário de venda"
+        if valor_sugerido > 0:
+            return (
+                f"{rotulo.capitalize()} de *{dados['produto_nome']}*: R$ {valor_sugerido:.2f} (já cadastrado no painel).\n"
+                f"Responda OK para manter esse valor, ou digite outro valor."
+            )
+        return f"Qual o {rotulo} (R$) de *{dados['produto_nome']}*?"
+
+    # ── ETAPA: pedindo/confirmando valor de um item do carrinho ──
     if etapa.endswith("_valor"):
         tipo = dados.get("tipo")
-        try:
-            valor = float(texto.replace(",", "."))
-        except ValueError:
-            return "Manda só o valor em número, por favor."
-        dados["valor_unitario"] = valor
-        total = round(valor * dados["quantidade"], 2)
-        dados["valor_total"] = total
-        salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
-        acao = {"entrada": "Entrada de", "venda": "Venda de", "saida": "Saída de"}[tipo]
-        return (
-            f"Confirma?\n"
-            f"{acao} {fmt_num(dados['quantidade'])} × *{dados['produto_nome']}* a R$ {valor:.2f} "
-            f"(total R$ {total:.2f})\n\nResponda SIM ou NÃO."
-        )
+        valor_sugerido = dados.get("valor_sugerido", 0) or 0
+        if texto_low in ("ok", "sim", "s", "manter", "confirmo") and valor_sugerido > 0:
+            valor = valor_sugerido
+        else:
+            try:
+                valor = float(texto.replace(",", "."))
+            except ValueError:
+                if valor_sugerido > 0:
+                    return "Responda OK para manter o valor sugerido, ou digite um número."
+                return "Manda o valor em número, por favor."
+
+        dados.setdefault("carrinho", []).append({
+            "produto_id": dados["produto_id"], "produto_nome": dados["produto_nome"],
+            "quantidade": dados["quantidade"], "valor_unitario": valor,
+        })
+        return avancar_fila_ou_confirmar(conn, numero_autorizado_id, dados, tipo)
 
     # ── ETAPA: cadastro de matéria-prima (opção 6) ──
     if etapa == "mp_nome":
@@ -640,11 +712,21 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
     if etapa == "confirmando":
         if texto_low in ("sim", "s", "confirmo", "confirmar"):
             tipo = dados.get("tipo")
-            aplicar_movimentacao(
-                conn, cliente["id"], dados["produto_id"], numero_autorizado_id,
-                tipo, dados["quantidade"], dados.get("valor_unitario", 0),
-                origem="formulario", mensagem_original=texto
-            )
+            carrinho = dados.get("carrinho")
+            if carrinho:
+                for item in carrinho:
+                    aplicar_movimentacao(
+                        conn, cliente["id"], item["produto_id"], numero_autorizado_id,
+                        tipo, item["quantidade"], item.get("valor_unitario", 0),
+                        origem="formulario", mensagem_original=texto
+                    )
+            else:
+                # compatibilidade com o modo IA, que ainda manda um único item
+                aplicar_movimentacao(
+                    conn, cliente["id"], dados["produto_id"], numero_autorizado_id,
+                    tipo, dados["quantidade"], dados.get("valor_unitario", 0),
+                    origem="formulario", mensagem_original=texto
+                )
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return "✅ Registrado com sucesso!\n\n" + resposta_menu()
         if texto_low in ("não", "nao", "n"):
