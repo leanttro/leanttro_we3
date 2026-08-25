@@ -2,9 +2,10 @@
 ESTOQUE WPP — Backend unificado
 Gerenciador de estoque, custos e vendas via WhatsApp (formulário ou IA/Groq)
 """
-import os, json, csv, io, bcrypt, re
+import os, json, csv, io, bcrypt, re, asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 import psycopg2
@@ -29,6 +30,7 @@ ALGORITHM     = "HS256"
 TOKEN_EXP     = 24 * 7  # horas
 DB_URL        = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/postgres")
 GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
+TIMEZONE_PADRAO = ZoneInfo("America/Sao_Paulo")
 
 GROQ_MODELOS_FALLBACK = [
     "llama-3.1-8b-instant",
@@ -36,18 +38,39 @@ GROQ_MODELOS_FALLBACK = [
     "gemma2-9b-it",
 ]
 
+# Ordem lógica: 1) operações do dia a dia, 2) relatórios, 3) cadastros,
+# 4) automação/config, 5) ajuda. Os números aqui precisam bater com o
+# roteamento em processar_texto() lá embaixo.
 MENU_TEXTO = (
     "📋 *Menu*\n"
     "1️⃣ Registrar entrada de estoque\n"
     "2️⃣ Registrar venda\n"
-    "3️⃣ Consultar estoque de um produto\n"
-    "4️⃣ Ajuste manual\n"
+    "3️⃣ Ajuste manual\n"
+    "4️⃣ Consultar estoque de um produto\n"
     "5️⃣ Resumo do dia\n"
-    "6️⃣ Cadastrar matéria-prima\n"
-    "7️⃣ Montar receita de um produto\n"
-    "8️⃣ Cadastrar produto\n"
-    "9️⃣ Visão geral do estoque\n\n"
+    "6️⃣ Visão geral do estoque\n"
+    "7️⃣ Cadastrar produto\n"
+    "8️⃣ Cadastrar matéria-prima\n"
+    "9️⃣ Montar receita de um produto\n"
+    "🔟 Configurar resumo automático\n"
+    "1️⃣1️⃣ Ajuda — o que cada opção faz\n\n"
     "Responda com o número da opção."
+)
+
+TEXTO_AJUDA = (
+    "ℹ️ *Como usar o sistema*\n\n"
+    "1️⃣ *Entrada de estoque* — registra chegada de mercadoria (aumenta o estoque).\n"
+    "2️⃣ *Venda* — registra uma venda (diminui o estoque e, se o produto tiver receita, "
+    "desconta as matérias-primas usadas automaticamente).\n"
+    "3️⃣ *Ajuste manual* — corrige o estoque de um produto pro valor exato que você digitar.\n"
+    "4️⃣ *Consultar estoque* — mostra estoque, custo e preço de venda de um produto.\n"
+    "5️⃣ *Resumo do dia* — total de entradas/vendas/ajustes de hoje.\n"
+    "6️⃣ *Visão geral* — lista todos os produtos e matérias-primas com o estoque atual.\n"
+    "7️⃣ *Cadastrar produto* — cria um novo produto (e opcionalmente já monta a receita dele).\n"
+    "8️⃣ *Cadastrar matéria-prima* — cria um novo insumo usado nas receitas.\n"
+    "9️⃣ *Montar receita* — define quais matérias-primas (e quantidades) um produto consome.\n"
+    "🔟 *Resumo automático* — escolha até 2 horários por dia pra receber o resumo (opção 5) sem precisar pedir.\n\n"
+    "A qualquer momento, digite *menu* para voltar aqui."
 )
 
 # ─────────────────────────────────────────
@@ -472,7 +495,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     # ── ETAPA: MENU ──
     if etapa == "menu":
-        opcoes = {"1": "entrada", "2": "venda", "3": "consulta", "4": "ajuste"}
+        opcoes = {"1": "entrada", "2": "venda", "3": "ajuste", "4": "consulta"}
         if texto.strip() in opcoes:
             tipo = opcoes[texto.strip()]
             produtos = listar_produtos_cliente(conn, cliente["id"])
@@ -489,17 +512,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             return await gerar_resumo_dia(conn, cliente["id"])
 
         if texto.strip() == "6":
-            salvar_sessao(conn, numero_autorizado_id, "mp_nome", {})
-            return "Qual o nome da nova matéria-prima?"
-
-        if texto.strip() == "8":
-            salvar_sessao(conn, numero_autorizado_id, "prod_nome", {})
-            return "Qual o nome do novo produto?"
-
-        if texto.strip() == "9":
             return gerar_visao_geral(conn, cliente["id"])
 
         if texto.strip() == "7":
+            salvar_sessao(conn, numero_autorizado_id, "prod_nome", {})
+            return "Qual o nome do novo produto?"
+
+        if texto.strip() == "8":
+            salvar_sessao(conn, numero_autorizado_id, "mp_nome", {})
+            return "Qual o nome da nova matéria-prima?"
+
+        if texto.strip() == "9":
             produtos = listar_produtos_cliente(conn, cliente["id"])
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
@@ -508,6 +531,20 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             dados = {"produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, "receita_produto_escolha", dados)
             return montar_lista_numerada(produtos, "De qual produto você quer montar/editar a receita?")
+
+        if texto.strip() == "10":
+            config = obter_config_resumo_automatico(conn, cliente["id"])
+            salvar_sessao(conn, numero_autorizado_id, "config_resumo_horarios", {})
+            return (
+                "🔟 *Resumo automático*\n\n"
+                f"Horários atuais: {formatar_horarios_config(config)}\n\n"
+                "Digite até 2 horários no formato HH:MM separados por vírgula "
+                "(ex: 12:00,20:00) para receber o resumo do dia automaticamente nesses horários.\n"
+                "Digite *desativar* para desligar o envio automático."
+            )
+
+        if texto.strip() == "11" or texto_low in ("ajuda", "help"):
+            return TEXTO_AJUDA + "\n\n" + resposta_menu()
 
         # modo IA: tenta extrair da mensagem livre antes de cair no menu
         if cliente["plano"] == "ia":
@@ -878,6 +915,30 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             return "Cancelado.\n\n" + resposta_menu()
         return "Responda SIM ou NÃO."
 
+    # ── ETAPA: configurando horário(s) do resumo automático (opção 10) ──
+    if etapa == "config_resumo_horarios":
+        if texto_low in ("desativar", "desligar", "remover", "cancelar_config"):
+            salvar_config_resumo_automatico(conn, cliente["id"], None, None, ativo=False)
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "🔕 Resumo automático desativado.\n\n" + resposta_menu()
+
+        horarios = parse_horarios(texto)
+        if horarios is None:
+            return (
+                "Não entendi os horários 🤔\n"
+                "Digite até 2 horários no formato HH:MM separados por vírgula (ex: 12:00,20:00), "
+                "ou *desativar* para desligar."
+            )
+        horario_1 = horarios[0]
+        horario_2 = horarios[1] if len(horarios) > 1 else None
+        salvar_config_resumo_automatico(conn, cliente["id"], horario_1, horario_2, ativo=True)
+        salvar_sessao(conn, numero_autorizado_id, "menu", {})
+        resumo_horarios = " e ".join(horarios)
+        return (
+            f"✅ Resumo automático configurado para {resumo_horarios} (todos os números autorizados recebem).\n\n"
+            + resposta_menu()
+        )
+
     # fallback de segurança
     salvar_sessao(conn, numero_autorizado_id, "menu", {})
     return resposta_menu()
@@ -956,17 +1017,145 @@ async def gerar_resumo_dia(conn, cliente_id: int) -> str:
     return txt + "\n" + resposta_menu()
 
 # ─────────────────────────────────────────
+#  RESUMO AUTOMÁTICO — configuração e disparo agendado
+# ─────────────────────────────────────────
+def parse_horarios(texto: str):
+    """Aceita até 2 horários no formato HH:MM separados por vírgula/espaço
+    (ex: '12:00,20:00' ou '12:00 20:00'). Retorna lista de strings 'HH:MM'
+    normalizadas, ou None se algo for inválido."""
+    partes = [p.strip() for p in re.split(r"[,\s]+", texto.strip()) if p.strip()]
+    if not partes or len(partes) > 2:
+        return None
+    horarios = []
+    for p in partes:
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", p)
+        if not m:
+            return None
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 23 or mi > 59:
+            return None
+        hhmm = f"{h:02d}:{mi:02d}"
+        if hhmm not in horarios:
+            horarios.append(hhmm)
+    return horarios or None
+
+def obter_config_resumo_automatico(conn, cliente_id: int):
+    return db_one(conn, "SELECT * FROM resumo_automatico_config WHERE cliente_id = %s", (cliente_id,))
+
+def formatar_horarios_config(config) -> str:
+    if not config or not config.get("ativo") or not (config.get("horario_1") or config.get("horario_2")):
+        return "nenhum configurado"
+    horarios = [str(h)[:5] for h in (config.get("horario_1"), config.get("horario_2")) if h]
+    return " e ".join(horarios)
+
+def salvar_config_resumo_automatico(conn, cliente_id: int, horario_1, horario_2, ativo: bool):
+    db_exec(conn, """
+        INSERT INTO resumo_automatico_config (cliente_id, horario_1, horario_2, ativo, atualizado_em)
+        VALUES (%s, %s, %s, %s, NOW())
+        ON CONFLICT (cliente_id) DO UPDATE
+        SET horario_1 = EXCLUDED.horario_1,
+            horario_2 = EXCLUDED.horario_2,
+            ativo = EXCLUDED.ativo,
+            atualizado_em = NOW()
+    """, (cliente_id, horario_1, horario_2, ativo))
+
+async def disparar_resumo_automatico_cliente(conn, cliente_id: int):
+    resumo = await gerar_resumo_dia(conn, cliente_id)
+    numeros = db_all(conn, "SELECT numero FROM numeros_autorizados WHERE cliente_id = %s AND ativo = TRUE",
+                      (cliente_id,))
+    for n in numeros:
+        await enviar_whatsapp(n["numero"], "⏰ *Resumo automático*\n\n" + resumo)
+
+async def checar_e_disparar_resumos_automaticos():
+    """Roda 1x por minuto. Compara o horário atual (America/Sao_Paulo) com os
+    horários configurados por cada cliente e dispara o resumo do dia quando
+    bate, evitando reenvio duplicado no mesmo dia via ultimo_envio_1/2."""
+    agora = datetime.now(TIMEZONE_PADRAO)
+    hoje = agora.date()
+    hora_atual = agora.strftime("%H:%M")
+
+    conn = get_conn_raw()
+    try:
+        configs = db_all(conn, "SELECT * FROM resumo_automatico_config WHERE ativo = TRUE")
+        for c in configs:
+            for campo_horario, campo_envio in (("horario_1", "ultimo_envio_1"), ("horario_2", "ultimo_envio_2")):
+                horario = c.get(campo_horario)
+                if not horario:
+                    continue
+                if str(horario)[:5] != hora_atual:
+                    continue
+                if c.get(campo_envio) == hoje:
+                    continue  # já disparou esse horário hoje
+                try:
+                    await disparar_resumo_automatico_cliente(conn, c["cliente_id"])
+                except Exception as e:
+                    print(f"⚠️ Erro ao disparar resumo automático (cliente {c['cliente_id']}): {e}")
+                db_exec(conn, f"UPDATE resumo_automatico_config SET {campo_envio} = %s WHERE cliente_id = %s",
+                        (hoje, c["cliente_id"]))
+    finally:
+        conn.close()
+
+async def loop_relogio_resumo_automatico():
+    while True:
+        try:
+            await checar_e_disparar_resumos_automaticos()
+        except Exception as e:
+            print(f"⚠️ Erro no relógio de resumo automático: {e}")
+        await asyncio.sleep(60)
+
+# ─────────────────────────────────────────
+#  STARTUP — Criar tabelas se não existirem
+# ─────────────────────────────────────────
+def criar_tabelas_resumo_automatico():
+    """Cria a tabela resumo_automatico_config no startup SE ela não existir.
+    Seguro: usa IF NOT EXISTS, nunca deleta ou altera dados existentes."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS resumo_automatico_config (
+                cliente_id      INTEGER PRIMARY KEY REFERENCES clientes(id) ON DELETE CASCADE,
+                horario_1       TIME NULL,
+                horario_2       TIME NULL,
+                ativo           BOOLEAN NOT NULL DEFAULT TRUE,
+                ultimo_envio_1  DATE NULL,
+                ultimo_envio_2  DATE NULL,
+                atualizado_em   TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """)
+        conn.commit()
+        print("✅ Tabela resumo_automatico_config: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela: {e}")
+    finally:
+        conn.close()
+
+# ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1️⃣ Criar tabelas necessárias
+    criar_tabelas_resumo_automatico()
+    
+    # 2️⃣ Testar conexão com banco
     try:
         conn = get_conn_raw()
         conn.close()
         print("✅ Conexão com banco OK")
     except Exception as e:
         print(f"⚠️ Não foi possível conectar ao banco no startup: {e}")
+
+    # 3️⃣ Iniciar o "relógio" de resumo automático
+    tarefa_relogio = asyncio.create_task(loop_relogio_resumo_automatico())
     yield
+    
+    # 4️⃣ Cleanup: cancelar o relógio quando o app fecha
+    tarefa_relogio.cancel()
+    try:
+        await tarefa_relogio
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(title="Estoque WPP", lifespan=lifespan)
 app.add_middleware(
