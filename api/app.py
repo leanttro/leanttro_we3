@@ -40,40 +40,41 @@ GROQ_MODELOS_FALLBACK = [
     "gemma2-9b-it",
 ]
 
-# Ordem lógica: 1) operações do dia a dia, 2) relatórios, 3) cadastros,
-# 4) automação/config, 5) ajuda. Os números aqui precisam bater com o
+# Ordem lógica atualizada pelo cliente. Os números aqui precisam bater com o
 # roteamento em processar_texto() lá embaixo.
 MENU_TEXTO = (
     "📋 *Menu*\n"
-    "1️⃣ Registrar entrada de estoque\n"
+    "1️⃣ Montar orçamento\n"
     "2️⃣ Registrar venda\n"
-    "3️⃣ Ajuste manual\n"
-    "4️⃣ Consultar estoque de um produto\n"
+    "3️⃣ Cadastrar produto\n"
+    "4️⃣ Cadastrar matéria-prima\n"
     "5️⃣ Resumo do dia\n"
-    "6️⃣ Visão geral do estoque\n"
-    "7️⃣ Cadastrar produto\n"
-    "8️⃣ Cadastrar matéria-prima\n"
-    "9️⃣ Montar receita de um produto\n"
-    "🔟 Configurar resumo automático\n"
+    "6️⃣ Registrar entrada de estoque\n"
+    "7️⃣ Visão geral do estoque\n"
+    "8️⃣ Configurar resumo automático\n"
+    "9️⃣ Adicionar Produto\n"
+    "🔟 Editar Produto\n"
     "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
-    "1️⃣2️⃣ Montar orçamento\n\n"
+    "0️⃣ Abrir menu\n\n"
     "Responda com o número da opção."
 )
 
 TEXTO_AJUDA = (
     "ℹ️ *Como usar o sistema*\n\n"
-    "1️⃣ *Entrada de estoque* — registra chegada de mercadoria (aumenta o estoque).\n"
+    "1️⃣ *Montar orçamento* — monta um orçamento com um ou mais produtos, aplica desconto/aumento "
+    "se você quiser e gera o texto pra enviar ao cliente.\n"
     "2️⃣ *Venda* — registra uma venda (diminui o estoque e, se o produto tiver receita, "
     "desconta as matérias-primas usadas automaticamente).\n"
-    "3️⃣ *Ajuste manual* — corrige o estoque de um produto pro valor exato que você digitar.\n"
-    "4️⃣ *Consultar estoque* — mostra estoque, custo e preço de venda de um produto.\n"
+    "3️⃣ *Cadastrar produto* — cria um novo produto (e opcionalmente já monta a receita dele).\n"
+    "4️⃣ *Cadastrar matéria-prima* — cria um novo insumo usado nas receitas.\n"
     "5️⃣ *Resumo do dia* — total de entradas/vendas/ajustes de hoje.\n"
-    "6️⃣ *Visão geral* — lista todos os produtos e matérias-primas com o estoque atual.\n"
-    "7️⃣ *Cadastrar produto* — cria um novo produto (e opcionalmente já monta a receita dele).\n"
-    "8️⃣ *Cadastrar matéria-prima* — cria um novo insumo usado nas receitas.\n"
-    "9️⃣ *Montar receita* — define quais matérias-primas (e quantidades) um produto consome.\n"
-    "🔟 *Resumo automático* — escolha até 2 horários por dia pra receber o resumo (opção 5) sem precisar pedir.\n\n"
-    "A qualquer momento, digite *menu* para voltar aqui."
+    "6️⃣ *Entrada de estoque* — registra chegada de mercadoria (aumenta o estoque).\n"
+    "7️⃣ *Visão geral* — lista todos os produtos e matérias-primas com o estoque atual.\n"
+    "8️⃣ *Resumo automático* — escolha até 2 horários por dia pra receber o resumo (opção 5) sem precisar pedir.\n"
+    "9️⃣ *Adicionar Produto* — define quais matérias-primas (e quantidades) um produto consome (monta a receita).\n"
+    "🔟 *Editar Produto* — corrige o estoque de um produto pro valor exato que você digitar.\n"
+    "1️⃣1️⃣ *Ajuda* — este texto que você está lendo agora.\n\n"
+    "A qualquer momento, digite *menu* ou *0* para voltar aqui."
 )
 
 # ─────────────────────────────────────────
@@ -646,7 +647,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     # ── ETAPA: MENU ──
     if etapa == "menu":
-        opcoes = {"1": "entrada", "2": "venda", "3": "ajuste", "4": "consulta"}
+        opcoes = {"6": "entrada", "2": "venda", "10": "ajuste"}
         if texto.strip() in opcoes:
             tipo = opcoes[texto.strip()]
             produtos = listar_produtos_cliente(conn, cliente["id"])
@@ -662,14 +663,14 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         if texto.strip() == "5":
             return await gerar_resumo_dia(conn, cliente["id"])
 
-        if texto.strip() == "6":
+        if texto.strip() == "7":
             return gerar_visao_geral(conn, cliente["id"])
 
-        if texto.strip() == "7":
+        if texto.strip() == "3":
             salvar_sessao(conn, numero_autorizado_id, "prod_nome", {})
             return "Qual o nome do novo produto?"
 
-        if texto.strip() == "8":
+        if texto.strip() == "4":
             salvar_sessao(conn, numero_autorizado_id, "mp_nome", {})
             return "Qual o nome da nova matéria-prima?"
 
@@ -683,7 +684,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "receita_produto_escolha", dados)
             return montar_lista_numerada(produtos, "De qual produto você quer montar/editar a receita?")
 
-        if texto.strip() == "10":
+        if texto.strip() == "8":
             config = obter_config_resumo_automatico(conn, cliente["id"])
             salvar_sessao(conn, numero_autorizado_id, "config_resumo_horarios", {})
             return (
@@ -697,7 +698,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         if texto.strip() == "11" or texto_low in ("ajuda", "help"):
             return TEXTO_AJUDA + "\n\n" + resposta_menu()
 
-        if texto.strip() == "12":
+        if texto.strip() == "1":
             produtos = listar_produtos_cliente(conn, cliente["id"])
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
@@ -960,7 +961,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             return "Cancelado.\n\n" + resposta_menu()
         return "Responda SIM ou NÃO."
 
-    # ── ETAPA: montar receita de um produto (opção 7) ──
+    # ── ETAPA: montar receita de um produto / Adicionar Produto (opção 9) ──
     if etapa == "receita_produto_escolha":
         produtos_ids = dados.get("produtos_ids", [])
         try:
@@ -1077,7 +1078,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             return "Cancelado.\n\n" + resposta_menu()
         return "Responda SIM ou NÃO."
 
-    # ── ETAPA: configurando horário(s) do resumo automático (opção 10) ──
+    # ── ETAPA: configurando horário(s) do resumo automático (opção 8) ──
     if etapa == "config_resumo_horarios":
         if texto_low in ("desativar", "desligar", "remover", "cancelar_config"):
             salvar_config_resumo_automatico(conn, cliente["id"], None, None, ativo=False)
@@ -1087,7 +1088,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         horarios = parse_horarios(texto)
         if horarios is None:
             return (
-                "Não entendi os horários 🤔\n"
+                "Formato de horário inválido 🤔\n"
                 "Digite até 2 horários no formato HH:MM separados por vírgula (ex: 12:00,20:00), "
                 "ou *desativar* para desligar."
             )
@@ -1101,7 +1102,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             + resposta_menu()
         )
 
-    # ── ETAPA: orçamento (opção 12) — escolhendo o(s) produto(s) ──
+    # ── ETAPA: orçamento (opção 1) — escolhendo o(s) produto(s) ──
     if etapa == "orc_escolha_produtos":
         produtos_ids = dados.get("produtos_ids", [])
         indices = parse_selecao_multipla(texto, len(produtos_ids))
@@ -1155,7 +1156,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         resultado_ajuste = parse_ajuste_preco_texto(texto, subtotal_atual)
         if resultado_ajuste is None:
             return (
-                "Não entendi. Digite um valor pra *desconto* (ex: 10 ou 10%), "
+                "Digite um valor pra *desconto* (ex: 10 ou 10%), "
                 "pra *aumento* (ex: +10 ou +10%), ou *NÃO* pra manter igual."
             )
         ajuste_tipo, ajuste_valor_informado = resultado_ajuste
