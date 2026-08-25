@@ -55,6 +55,7 @@ MENU_TEXTO = (
     "9️⃣ Definir Matéria-Prima\n"
     "🔟 Editar Estoque ou dados do Produto\n"
     "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
+    "1️⃣2️⃣ Calculadora de custos fixos\n"
     "0️⃣ Abrir menu\n\n"
     "Responda com o número da opção."
 )
@@ -72,9 +73,16 @@ TEXTO_AJUDA = (
     "7️⃣ *Visão geral* — lista todos os produtos e matérias-primas com o estoque atual.\n"
     "8️⃣ *Resumo automático* — escolha até 2 horários por dia pra receber o resumo (opção 5) sem precisar pedir.\n"
     "9️⃣ *Definir Matéria-Prima* — define quais matérias-primas (e quantidades) um produto consome (monta a receita).\n"
-    "🔟 *Editar Estoque ou dados do Produto* — corrige o estoque (quantidade) de um ou mais produtos de uma vez, "
-    "ou edita nome, custo unitário, preço de venda e/ou SKU de um produto específico.\n"
-    "1️⃣1️⃣ *Ajuda* — este texto que você está lendo agora.\n\n"
+    "🔟 *Editar Estoque ou dados do Produto* — ao escolher essa opção, você escolhe entre:\n"
+    "   1 - Editar estoque (quantidade) de um ou mais produtos de uma vez;\n"
+    "   2 - Editar nome, custo unitário, preço de venda e/ou SKU de um produto específico "
+    "(você escolhe quais campos mudar, informa os novos valores e confirma antes de salvar).\n"
+    "1️⃣1️⃣ *Ajuda* — este texto que você está lendo agora.\n"
+    "1️⃣2️⃣ *Calculadora de custos fixos* — soma as contas fixas do negócio (aluguel, luz, internet etc.) "
+    "e mostra o total, com a lista de cada conta. É diferente da calculadora que aparece durante o cadastro "
+    "de produto (opção 3): aquela usa o custo fixo pra sugerir o preço de venda de UM produto específico "
+    "(rateando o custo fixo pelo volume esperado e aplicando uma margem de lucro); esta aqui é só uma soma "
+    "simples das contas, sem gerar preço de produto nenhum.\n\n"
     "A qualquer momento, digite *menu* ou *0* para voltar aqui."
 )
 
@@ -671,6 +679,107 @@ def texto_resultado_calculadora(dados: dict, resultado: dict) -> str:
     )
 
 # ─────────────────────────────────────────
+#  EDIÇÃO DE CAMPOS DO PRODUTO (nome/custo/preço/SKU) — TAREFA 1 (opção 10.2)
+# ─────────────────────────────────────────
+# Cada item é (nome_da_coluna_no_banco, rótulo mostrado pro usuário). A ordem
+# aqui define a numeração do submenu (1, 2, 3, 4).
+CAMPOS_EDITAVEIS_PRODUTO = [
+    ("nome", "Nome"),
+    ("custo_unitario", "Custo unitário"),
+    ("preco_venda", "Preço de venda"),
+    ("sku", "SKU"),
+]
+CAMPO_LABEL_PRODUTO = dict(CAMPOS_EDITAVEIS_PRODUTO)
+CAMPOS_NUMERICOS_PRODUTO = {"custo_unitario", "preco_venda"}
+
+def texto_menu_campos_editar(nome_produto: str) -> str:
+    linhas = [f"Quais campos você quer editar em *{nome_produto}*?", ""]
+    for i, (_, label) in enumerate(CAMPOS_EDITAVEIS_PRODUTO, start=1):
+        linhas.append(f"{i} - {label}")
+    linhas.append("")
+    linhas.append("Responda com o(s) número(s). Pra mais de um, separe por vírgula (ex: 2,3).")
+    return "\n".join(linhas)
+
+def parse_valor_campo_produto(campo: str, texto: str):
+    """Converte o texto digitado pro tipo certo do campo. Retorna (ok, valor)."""
+    texto = texto.strip()
+    if not texto:
+        return False, None
+    if campo in CAMPOS_NUMERICOS_PRODUTO:
+        try:
+            return True, float(texto.replace(",", "."))
+        except ValueError:
+            return False, None
+    return True, texto  # nome / sku: texto livre
+
+def montar_resumo_edicao_produto(dados: dict) -> str:
+    """Monta o resumo 'de → para' de cada campo escolhido, pra confirmação SIM/NÃO."""
+    atual = dados.get("editar_produto_atual", {})
+    novos = dados.get("editar_campos_novos", {})
+    linhas = [f"Confirma as alterações em *{dados.get('editar_produto_nome')}*?", ""]
+    for campo, valor_novo in novos.items():
+        valor_atual = atual.get(campo)
+        if campo in CAMPOS_NUMERICOS_PRODUTO:
+            atual_fmt = f"R$ {float(valor_atual or 0):.2f}"
+            novo_fmt = f"R$ {float(valor_novo):.2f}"
+        else:
+            atual_fmt = valor_atual if valor_atual else "(vazio)"
+            novo_fmt = valor_novo
+        linhas.append(f"- {CAMPO_LABEL_PRODUTO[campo]}: {atual_fmt} → {novo_fmt}")
+    linhas.append("")
+    linhas.append("Responda SIM ou NÃO.")
+    return "\n".join(linhas)
+
+def aplicar_edicao_produto(conn, cliente_id: int, produto_id: int, campos_novos: dict):
+    """Grava no banco só os campos escolhidos pelo usuário — os demais campos
+    do produto ficam intactos (TAREFA 1). `campos_novos` só pode conter chaves
+    vindas de CAMPO_LABEL_PRODUTO (nunca texto livre do usuário), então é
+    seguro usá-las como nome de coluna no SQL."""
+    campos_novos = {k: v for k, v in (campos_novos or {}).items() if k in CAMPO_LABEL_PRODUTO}
+    if not campos_novos:
+        return
+    sets = [f"{campo} = %s" for campo in campos_novos]
+    params = list(campos_novos.values()) + [produto_id, cliente_id]
+    sql = f"UPDATE produtos SET {', '.join(sets)} WHERE id = %s AND cliente_id = %s"
+    db_exec(conn, sql, tuple(params))
+
+# ─────────────────────────────────────────
+#  CALCULADORA DE CUSTOS FIXOS (somatória simples) — TAREFA 3 (opção 12)
+# ─────────────────────────────────────────
+# Diferente da calculadora de custo/preço acima (que roda dentro do cadastro
+# de produto e sugere um preço de venda pra UM produto, rateando custo fixo
+# por volume + margem): esta aqui só soma as contas fixas do negócio.
+def parse_conta_fixa_texto(texto: str):
+    """Aceita 'Aluguel 2000' ou 'Aluguel R$ 2.000,00' (nome + valor no final da
+    mensagem). Retorna (nome, valor) ou None se não conseguir separar os dois."""
+    texto = texto.strip().replace("R$", "").replace("r$", "").strip()
+    if not texto:
+        return None
+    partes = texto.rsplit(" ", 1)
+    if len(partes) != 2:
+        return None
+    nome, valor_str = partes
+    nome = nome.strip()
+    valor_str = valor_str.strip().replace(".", "").replace(",", ".")
+    if not nome or not valor_str:
+        return None
+    try:
+        valor = float(valor_str)
+    except ValueError:
+        return None
+    if valor < 0:
+        return None
+    return nome, valor
+
+def montar_texto_resultado_custos_fixos(itens: list, total: float) -> str:
+    linhas = ["🧮 *Total de contas fixas*", ""]
+    for item in itens:
+        linhas.append(f"- {item['nome']}: R$ {item['valor']:.2f}")
+    linhas.append("")
+    linhas.append(f"*Total: R$ {total:.2f}*")
+    return "\n".join(linhas)
+
+# ─────────────────────────────────────────
 #  IA (GROQ) — extração estruturada
 # ─────────────────────────────────────────
 def get_groq_key(cliente: dict) -> str:
@@ -678,42 +787,60 @@ def get_groq_key(cliente: dict) -> str:
         return cliente["groq_key_override"]
     return GROQ_API_KEY_1 or GROQ_API_KEY_2
 
-PROMPT_EXTRACAO = """Você é um extrator de dados de estoque. O usuário vai descrever uma movimentação em linguagem natural (entrada de mercadoria, venda ou saída).
+PROMPT_UNIFICADO = """Você é o classificador único de intenção de um sistema de estoque via WhatsApp. Analise a
+mensagem do usuário e responda APENAS com um JSON válido, sem nenhum texto antes ou depois, classificando a
+intenção em UMA destas opções:
+- "entrada": chegada de mercadoria (aumenta estoque)
+- "venda": venda de um produto (diminui estoque)
+- "saida": saída de estoque que não é venda (perda, quebra, uso interno etc.)
+- "cadastro_produto": o usuário quer cadastrar um produto novo
+- "edicao_produto": o usuário quer editar nome, custo, preço de venda e/ou SKU de um produto JÁ existente
+- "custos_fixos": o usuário quer somar contas fixas do negócio (aluguel, luz, internet etc.), sem relação com um produto específico
+- "nenhuma": a mensagem não se encaixa em nenhuma das opções acima
 
-Responda APENAS com um JSON válido, sem nenhum texto antes ou depois, no formato:
-{"tipo": "entrada|venda|saida", "produto": "nome do produto", "quantidade": numero, "valor_unitario": numero, "cliente": "nome ou telefone do cliente, se mencionado, senão null"}
-
-O campo "cliente" só é relevante quando "tipo" é "venda" e a mensagem menciona claramente quem comprou
-(ex: "vendi 3 bolos pra Maria", "venda pro João, telefone 11999998888"). Se não houver menção a um cliente, use null.
-Se não conseguir identificar algum campo com confiança, use null nesse campo.
-Se a mensagem não for sobre estoque/venda, responda: {"tipo": null}
-"""
-
-PROMPT_EXTRACAO_PRODUTO_CALC = """Você é um extrator de dados para cadastro de produto, incluindo uma calculadora
-de custo/preço, num sistema de estoque via WhatsApp. O usuário vai descrever, em linguagem natural, que quer
-cadastrar um novo produto — às vezes já sabendo o custo/preço, às vezes pedindo ajuda pra calcular a partir de
-custo fixo do negócio, volume de vendas esperado e margem de lucro desejada.
-
-Responda APENAS com um JSON válido, sem nenhum texto antes ou depois, no formato:
+Responda sempre no formato abaixo, preenchendo com null os campos que não se aplicam à intenção detectada:
 {
-  "tipo": "cadastro_produto",
-  "nome": "nome do produto ou null",
-  "unidade": "un/kg/l/etc ou null",
+  "intencao": "entrada" | "venda" | "saida" | "cadastro_produto" | "edicao_produto" | "custos_fixos" | "nenhuma",
+
+  "produto": "nome do produto (só para entrada/venda/saida) ou null",
+  "quantidade": numero ou null,
+  "valor_unitario": numero ou null,
+  "cliente": "nome ou telefone do cliente — só quando intencao é venda e a mensagem menciona claramente quem comprou (ex: 'vendi 3 bolos pra Maria'), senão null",
+
+  "nome": "nome do NOVO produto (só para cadastro_produto) ou null",
+  "unidade": "un/kg/l/etc (só para cadastro_produto) ou null",
   "custo_unitario": numero ou null,
   "preco_venda": numero ou null,
   "quer_calculadora": true/false/null,
   "custo_variavel_unitario": numero ou null,
   "custo_fixo_mensal": numero ou null,
   "volume_esperado_mensal": numero ou null,
-  "margem_percentual": numero ou null
+  "margem_percentual": numero ou null,
+
+  "produto_editar": "nome do produto JÁ EXISTENTE que o usuário quer editar (só para edicao_produto) ou null",
+  "nome_novo": "novo nome do produto, se quiser mudar, ou null",
+  "custo_unitario_novo": numero ou null,
+  "preco_venda_novo": numero ou null,
+  "sku_novo": "novo SKU, se quiser mudar, ou null",
+
+  "contas_fixas": [{"nome": "nome da conta", "valor": numero}, ...] (só para custos_fixos, uma entrada por conta) ou null
 }
 
-"quer_calculadora" deve ser true quando o usuário pede ajuda pra calcular o preço (menciona aluguel, luz, custo fixo,
-quantas unidades espera vender, margem de lucro etc.) e não informou custo_unitario/preco_venda diretamente.
-Se a mensagem não for sobre cadastrar um produto, responda: {"tipo": null}
+Regras importantes:
+- Em "cadastro_produto", "quer_calculadora" deve ser true quando o usuário pede ajuda pra calcular o preço
+  (menciona aluguel, luz, custo fixo, quantas unidades espera vender, margem de lucro etc.) e não informou
+  custo_unitario/preco_venda diretamente.
+- Em "edicao_produto", só use essa intenção quando o produto mencionado parecer já existir no estoque (ex:
+  "muda o preço do bolo pra 30", "atualiza o SKU do brigadeiro pra BRG-01", "renomeia X pra Y", "o custo do
+  brigadeiro agora é 2 e o nome mudou pra Brigadeiro Gourmet"). Preencha só os campos "_novo" que o usuário
+  realmente mencionou; deixe os demais null.
+- Em "custos_fixos", preencha "contas_fixas" com uma entrada por conta mencionada (nome + valor). NÃO some os
+  valores você mesmo — apenas liste cada conta separadamente, a soma é feita fora da IA.
+- Se não conseguir identificar algum campo com confiança, use null nesse campo.
+- Se a mensagem não se encaixar em nenhuma intenção, responda apenas: {"intencao": "nenhuma"}
 """
 
-async def chamar_groq_json(texto_usuario: str, groq_key: str, prompt: str = PROMPT_EXTRACAO) -> Optional[dict]:
+async def chamar_groq_json(texto_usuario: str, groq_key: str, prompt: str = PROMPT_UNIFICADO) -> Optional[dict]:
     if not groq_key:
         print("⚠️ GROQ: nenhuma chave configurada (env var vazia)")
         return None
@@ -724,7 +851,7 @@ async def chamar_groq_json(texto_usuario: str, groq_key: str, prompt: str = PROM
     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=25) as client:
         for modelo in GROQ_MODELOS_FALLBACK:
-            payload = {"model": modelo, "temperature": 0.1, "max_tokens": 200, "messages": messages}
+            payload = {"model": modelo, "temperature": 0.1, "max_tokens": 500, "messages": messages}
             try:
                 resp = await client.post(GROQ_API_URL, headers=headers, json=payload)
                 if resp.status_code != 200:
@@ -774,7 +901,25 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     # ── ETAPA: MENU ──
     if etapa == "menu":
-        opcoes = {"6": "entrada", "2": "venda", "10": "ajuste"}
+        if texto.strip() == "10":
+            salvar_sessao(conn, numero_autorizado_id, "editar_menu", {})
+            return (
+                "🔟 *Editar Estoque ou dados do Produto*\n"
+                "1 - Editar estoque (quantidade)\n"
+                "2 - Editar nome, custo, preço de venda ou SKU\n\n"
+                "Responda com o número."
+            )
+
+        if texto.strip() == "12":
+            salvar_sessao(conn, numero_autorizado_id, "custosfixos_item", {"custosfixos_itens": []})
+            return (
+                "🧮 *Calculadora de custos fixos*\n"
+                "Soma as contas fixas do seu negócio (aluguel, luz, internet etc.) — diferente da calculadora "
+                "que aparece no cadastro de produto, esta não sugere preço, só soma.\n\n"
+                "Manda o nome e o valor de cada conta (ex: Aluguel 2000). Digite PRONTO quando terminar."
+            )
+
+        opcoes = {"6": "entrada", "2": "venda"}
         if texto.strip() in opcoes:
             tipo = opcoes[texto.strip()]
             produtos = listar_produtos_cliente(conn, cliente["id"])
@@ -836,20 +981,157 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             rodape = "Responda com o(s) número(s) dos produtos do orçamento. Pra mais de um, separe por vírgula (ex: 1,3,5)."
             return montar_lista_numerada(produtos, "🧾 *Montar orçamento*\nQuais produtos entram?", rodape=rodape, mostrar_preco=True)
 
-        # modo IA: tenta extrair da mensagem livre antes de cair no menu
+        # modo IA: UMA ÚNICA chamada à Groq classifica a intenção e já devolve
+        # os campos relevantes pra ela — sem chamadas adicionais depois (TAREFA 2).
         if cliente["plano"] == "ia":
             extraido = await chamar_groq_json(texto, get_groq_key(cliente))
-            if extraido and extraido.get("tipo") in ("entrada", "venda", "saida"):
+            intencao = extraido.get("intencao") if extraido else None
+
+            if intencao in ("entrada", "venda", "saida"):
+                extraido["tipo"] = intencao  # compatibilidade com preparar_confirmacao_ia
                 return await preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto)
 
-            # não era movimentação — tenta reconhecer um cadastro de produto (com/sem calculadora)
-            extraido_produto = await chamar_groq_json(texto, get_groq_key(cliente), prompt=PROMPT_EXTRACAO_PRODUTO_CALC)
-            if extraido_produto and extraido_produto.get("tipo") == "cadastro_produto":
-                resposta_ia = await iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extraido_produto)
+            if intencao == "cadastro_produto":
+                resposta_ia = await iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extraido)
+                if resposta_ia:
+                    return resposta_ia
+
+            elif intencao == "edicao_produto":
+                resposta_ia = await iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraido)
+                if resposta_ia:
+                    return resposta_ia
+
+            elif intencao == "custos_fixos":
+                resposta_ia = iniciar_calculadora_custos_fixos_ia(extraido)
                 if resposta_ia:
                     return resposta_ia
 
         return "Olá, bem-vindo(a) ao Painel do Seu Negócio!\n\n" + resposta_menu()
+
+    # ── ETAPA: submenu da opção 10 — estoque (quantidade) ou dados do produto — TAREFA 1 ──
+    if etapa == "editar_menu":
+        if texto.strip() == "1":
+            produtos = listar_produtos_cliente(conn, cliente["id"])
+            if not produtos:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("Você ainda não tem nenhum produto cadastrado. "
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+            # Exatamente o mesmo fluxo de ajuste de estoque de sempre (múltiplos produtos, fila).
+            dados = {"tipo": "ajuste", "produtos_ids": [p["id"] for p in produtos]}
+            salvar_sessao(conn, numero_autorizado_id, "ajuste_produto", dados)
+            rodape = "Responda com o número. Pra mais de um produto, separe por vírgula (ex: 1,3,5)."
+            return montar_lista_numerada(produtos, "Qual produto?", rodape=rodape)
+
+        if texto.strip() == "2":
+            produtos = listar_produtos_cliente(conn, cliente["id"])
+            if not produtos:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("Você ainda não tem nenhum produto cadastrado. "
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+            dados = {"produtos_ids": [p["id"] for p in produtos]}
+            salvar_sessao(conn, numero_autorizado_id, "editar_campo_produto_escolha", dados)
+            return montar_lista_numerada(produtos, "Qual produto você quer editar (nome/custo/preço/SKU)?")
+
+        return "Responda 1 (editar estoque) ou 2 (editar nome, custo, preço ou SKU)."
+
+    # ── ETAPA: edição de produto — escolhendo QUAL produto (um só por vez) — TAREFA 1 ──
+    if etapa == "editar_campo_produto_escolha":
+        produtos_ids = dados.get("produtos_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(produtos_ids)
+        except (ValueError, AssertionError):
+            return f"Manda só o número do produto (1 a {len(produtos_ids)})."
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                          (produtos_ids[idx - 1], cliente["id"]))
+        if not produto:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Esse produto não existe mais.\n\n" + resposta_menu()
+        dados = {
+            "editar_produto_id": produto["id"],
+            "editar_produto_nome": produto["nome"],
+            "editar_produto_atual": {
+                "nome": produto["nome"],
+                "custo_unitario": float(produto["custo_unitario"] or 0),
+                "preco_venda": float(produto["preco_venda"] or 0),
+                "sku": produto.get("sku"),
+            },
+        }
+        salvar_sessao(conn, numero_autorizado_id, "editar_campo_escolha", dados)
+        return texto_menu_campos_editar(produto["nome"])
+
+    # ── ETAPA: edição de produto — escolhendo quais campos mudar (aceita "2,3") — TAREFA 1 ──
+    if etapa == "editar_campo_escolha":
+        indices = parse_selecao_multipla(texto, len(CAMPOS_EDITAVEIS_PRODUTO))
+        if not indices:
+            return (f"Manda o número do campo (1 a {len(CAMPOS_EDITAVEIS_PRODUTO)}). "
+                     "Pra mais de um, separe por vírgula, ex: 2,3.")
+        fila_campos = [CAMPOS_EDITAVEIS_PRODUTO[i - 1][0] for i in indices]
+        dados["editar_campos_fila"] = fila_campos
+        dados["editar_campos_novos"] = {}
+        campo_atual = dados["editar_campos_fila"].pop(0)
+        dados["editar_campo_atual"] = campo_atual
+        salvar_sessao(conn, numero_autorizado_id, "editar_campo_valor", dados)
+        return f"Novo valor para *{CAMPO_LABEL_PRODUTO[campo_atual]}*?"
+
+    # ── ETAPA: edição de produto — pedindo o novo valor de cada campo, um de cada vez — TAREFA 1 ──
+    if etapa == "editar_campo_valor":
+        campo_atual = dados.get("editar_campo_atual")
+        ok, valor = parse_valor_campo_produto(campo_atual, texto)
+        if not ok:
+            if campo_atual in CAMPOS_NUMERICOS_PRODUTO:
+                return "Manda só o número, por favor."
+            return "Manda um valor válido, por favor."
+        dados.setdefault("editar_campos_novos", {})[campo_atual] = valor
+        dados.pop("editar_campo_atual", None)
+
+        fila = dados.get("editar_campos_fila", [])
+        if fila:
+            proximo = fila.pop(0)
+            dados["editar_campos_fila"] = fila
+            dados["editar_campo_atual"] = proximo
+            salvar_sessao(conn, numero_autorizado_id, "editar_campo_valor", dados)
+            return f"Novo valor para *{CAMPO_LABEL_PRODUTO[proximo]}*?"
+
+        salvar_sessao(conn, numero_autorizado_id, "editar_campo_confirmar", dados)
+        return montar_resumo_edicao_produto(dados)
+
+    # ── ETAPA: edição de produto — confirmação final e gravação (só campos escolhidos) — TAREFA 1 ──
+    if etapa == "editar_campo_confirmar":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            aplicar_edicao_produto(conn, cliente["id"], dados["editar_produto_id"], dados.get("editar_campos_novos", {}))
+            nome_final = dados.get("editar_campos_novos", {}).get("nome", dados.get("editar_produto_nome"))
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return f"✅ *{nome_final}* atualizado com sucesso!\n\n" + resposta_menu()
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Cancelado.\n\n" + resposta_menu()
+        return "Responda SIM ou NÃO."
+
+    # ── ETAPA: calculadora de custos fixos — coletando conta por conta até PRONTO — TAREFA 3 ──
+    if etapa == "custosfixos_item":
+        if texto_low == "pronto":
+            itens = dados.get("custosfixos_itens", [])
+            if not itens:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return "Nenhuma conta adicionada. Calculadora cancelada.\n\n" + resposta_menu()
+            total = sum(item["valor"] for item in itens)  # soma sempre em Python
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return montar_texto_resultado_custos_fixos(itens, total) + "\n\n" + resposta_menu()
+
+        resultado = parse_conta_fixa_texto(texto)
+        if not resultado:
+            return ("Não entendi. Manda o nome e o valor da conta (ex: Aluguel 2000), "
+                     "ou digite PRONTO para terminar.")
+        nome_conta, valor_conta = resultado
+        dados.setdefault("custosfixos_itens", []).append({"nome": nome_conta, "valor": valor_conta})
+        salvar_sessao(conn, numero_autorizado_id, "custosfixos_item", dados)
+        total_parcial = sum(item["valor"] for item in dados["custosfixos_itens"])
+        return (
+            f"Adicionado: {nome_conta} — R$ {valor_conta:.2f}\n"
+            f"Total parcial: R$ {total_parcial:.2f}\n\n"
+            "Manda a próxima conta, ou digite PRONTO para terminar."
+        )
 
     # ── ETAPA: escolhendo o(s) produto(s) da lista numerada ──
     if etapa.endswith("_produto"):
@@ -1617,6 +1899,78 @@ async def iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extra
         f"(custo R$ {dados['prod_custo']:.2f}, venda R$ {dados['prod_preco']:.2f}).\n"
         "Qual o estoque inicial desse produto?"
     )
+
+async def iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraido) -> Optional[str]:
+    """TAREFA 1 — modo IA: reconhece um pedido de edição de produto numa mensagem
+    livre (ex: 'muda o preço do bolo pra 30 e o nome pra Bolo Premium') e monta
+    o mesmo resumo de confirmação usado no fluxo do formulário (etapa
+    'editar_campo_confirmar'), aplicando só os campos que a IA identificou.
+    Retorna None se não achou o produto mencionado ou nenhuma alteração concreta
+    — nesse caso o chamador segue o fluxo normal."""
+    nome_produto = extraido.get("produto_editar")
+    if not nome_produto or not nome_produto.strip():
+        return None
+
+    produto = buscar_produto_por_nome(conn, cliente["id"], nome_produto)
+    if not produto:
+        return (f"Não encontrei nenhum produto chamado '{nome_produto}'. "
+                 "Confira o nome ou use a opção 10 do menu.\n\n") + resposta_menu()
+
+    campos_novos = {}
+    if extraido.get("nome_novo"):
+        campos_novos["nome"] = str(extraido["nome_novo"]).strip()
+    if extraido.get("custo_unitario_novo") is not None:
+        try:
+            campos_novos["custo_unitario"] = float(extraido["custo_unitario_novo"])
+        except (TypeError, ValueError):
+            pass
+    if extraido.get("preco_venda_novo") is not None:
+        try:
+            campos_novos["preco_venda"] = float(extraido["preco_venda_novo"])
+        except (TypeError, ValueError):
+            pass
+    if extraido.get("sku_novo"):
+        campos_novos["sku"] = str(extraido["sku_novo"]).strip()
+
+    if not campos_novos:
+        return None  # a IA marcou "edicao_produto" mas não trouxe nenhum campo concreto pra mudar
+
+    dados = {
+        "editar_produto_id": produto["id"],
+        "editar_produto_nome": produto["nome"],
+        "editar_produto_atual": {
+            "nome": produto["nome"],
+            "custo_unitario": float(produto["custo_unitario"] or 0),
+            "preco_venda": float(produto["preco_venda"] or 0),
+            "sku": produto.get("sku"),
+        },
+        "editar_campos_novos": campos_novos,
+    }
+    salvar_sessao(conn, numero_autorizado_id, "editar_campo_confirmar", dados)
+    return montar_resumo_edicao_produto(dados)
+
+def iniciar_calculadora_custos_fixos_ia(extraido) -> Optional[str]:
+    """TAREFA 3 — modo IA: reconhece uma lista de contas fixas numa mensagem livre
+    (ex: 'aluguel 2000, luz 300, água 100') e soma tudo em Python — nunca confia
+    na soma que a IA possa ter feito. Não usa/altera sessão: é resposta única.
+    Retorna None se não veio nenhuma conta válida — o chamador segue o fluxo normal."""
+    contas = extraido.get("contas_fixas")
+    if not contas:
+        return None
+    itens = []
+    for c in contas:
+        nome = (c or {}).get("nome")
+        valor = (c or {}).get("valor")
+        if not nome or valor is None:
+            continue
+        try:
+            itens.append({"nome": str(nome).strip(), "valor": float(valor)})
+        except (TypeError, ValueError):
+            continue
+    if not itens:
+        return None
+    total = sum(item["valor"] for item in itens)  # soma sempre em Python, nunca confia na IA
+    return montar_texto_resultado_custos_fixos(itens, total) + "\n\n" + resposta_menu()
 
 def gerar_visao_geral(conn, cliente_id: int) -> str:
     """Lista todos os produtos e matérias-primas com o estoque atual,
