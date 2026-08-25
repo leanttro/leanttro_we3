@@ -292,7 +292,7 @@ def fmt_num(valor) -> str:
 
 def listar_produtos_cliente(conn, cliente_id: int):
     return db_all(conn, """
-        SELECT id, nome FROM produtos
+        SELECT id, nome, preco_venda FROM produtos
         WHERE cliente_id = %s AND ativo = TRUE
         ORDER BY nome
     """, (cliente_id,))
@@ -304,10 +304,14 @@ def listar_materias_primas_cliente(conn, cliente_id: int):
         ORDER BY nome
     """, (cliente_id,))
 
-def montar_lista_numerada(itens, titulo: str, rodape: str = "Responda com o número.") -> str:
+def montar_lista_numerada(itens, titulo: str, rodape: str = "Responda com o número.", mostrar_preco: bool = False) -> str:
     linhas = [titulo, ""]
     for i, item in enumerate(itens, start=1):
-        linhas.append(f"{i}. {item['nome']}")
+        if mostrar_preco:
+            preco = float(item.get("preco_venda") or 0)
+            linhas.append(f"{i}. {item['nome']} — {formatar_moeda(preco)}")
+        else:
+            linhas.append(f"{i}. {item['nome']}")
     linhas.append("")
     linhas.append(rodape)
     return "\n".join(linhas)
@@ -389,21 +393,28 @@ def calcular_itens_orcamento(conn, cliente_id: int, itens: list) -> tuple:
         })
     return itens_detalhados, subtotal
 
-def calcular_desconto(subtotal: float, desconto_tipo: Optional[str], desconto_valor_informado: float) -> float:
-    if desconto_tipo == "percentual":
-        desconto_calculado = subtotal * (desconto_valor_informado / 100)
-    elif desconto_tipo == "valor":
-        desconto_calculado = desconto_valor_informado
+def calcular_ajuste_preco(subtotal: float, ajuste_tipo: Optional[str], ajuste_valor_informado: float) -> float:
+    """Retorna o valor de ajuste a somar ao subtotal.
+    Negativo = desconto, positivo = aumento, zero = manteve igual.
+    ajuste_tipo: 'desconto_percentual' | 'desconto_valor' | 'aumento_percentual' | 'aumento_valor' | None"""
+    if ajuste_tipo == "desconto_percentual":
+        ajuste = -(subtotal * (ajuste_valor_informado / 100))
+    elif ajuste_tipo == "desconto_valor":
+        ajuste = -ajuste_valor_informado
+    elif ajuste_tipo == "aumento_percentual":
+        ajuste = subtotal * (ajuste_valor_informado / 100)
+    elif ajuste_tipo == "aumento_valor":
+        ajuste = ajuste_valor_informado
     else:
-        desconto_calculado = 0.0
-    return min(max(desconto_calculado, 0.0), subtotal)  # nunca deixa o total ficar negativo
+        ajuste = 0.0
+    if subtotal + ajuste < 0:  # nunca deixa o total ficar negativo
+        ajuste = -subtotal
+    return ajuste
 
-def montar_texto_orcamento(cliente: dict, itens_detalhados: list, subtotal: float, desconto_tipo: Optional[str],
-                            desconto_calculado: float, desconto_valor_informado: float, total: float,
+def montar_texto_orcamento(cliente: dict, itens_detalhados: list, subtotal: float, ajuste_tipo: Optional[str],
+                            ajuste_calculado: float, ajuste_valor_informado: float, total: float,
                             observacoes: Optional[str] = None, nome_cliente: Optional[str] = None) -> str:
     linhas = ["🧾 *Orçamento*"]
-    if cliente.get("nome_negocio"):
-        linhas.append(f"_{cliente['nome_negocio']}_")
     if nome_cliente:
         linhas.append(f"Para: {nome_cliente}")
     linhas.append("")
@@ -411,11 +422,16 @@ def montar_texto_orcamento(cliente: dict, itens_detalhados: list, subtotal: floa
         linhas.append(f"▪️ {formatar_qtd(item['quantidade'])}x {item['nome']} — {formatar_moeda(item['subtotal'])}")
     linhas.append("")
     linhas.append(f"Subtotal: {formatar_moeda(subtotal)}")
-    if desconto_calculado > 0:
-        if desconto_tipo == "percentual":
-            linhas.append(f"Desconto ({formatar_qtd(desconto_valor_informado)}%): -{formatar_moeda(desconto_calculado)}")
+    if ajuste_calculado < 0:
+        if ajuste_tipo == "desconto_percentual":
+            linhas.append(f"Desconto ({formatar_qtd(ajuste_valor_informado)}%): -{formatar_moeda(abs(ajuste_calculado))}")
         else:
-            linhas.append(f"Desconto: -{formatar_moeda(desconto_calculado)}")
+            linhas.append(f"Desconto: -{formatar_moeda(abs(ajuste_calculado))}")
+    elif ajuste_calculado > 0:
+        if ajuste_tipo == "aumento_percentual":
+            linhas.append(f"Acréscimo ({formatar_qtd(ajuste_valor_informado)}%): +{formatar_moeda(ajuste_calculado)}")
+        else:
+            linhas.append(f"Acréscimo: +{formatar_moeda(ajuste_calculado)}")
     linhas.append(f"*Total: {formatar_moeda(total)}*")
     if observacoes:
         linhas.append("")
@@ -423,33 +439,46 @@ def montar_texto_orcamento(cliente: dict, itens_detalhados: list, subtotal: floa
     return "\n".join(linhas)
 
 def salvar_orcamento_db(conn, cliente_id: int, nome_cliente, itens_detalhados: list, subtotal: float,
-                         desconto_tipo, desconto_calculado: float, total: float, texto_formatado: str,
+                         ajuste_tipo, ajuste_calculado: float, total: float, texto_formatado: str,
                          observacoes) -> dict:
     return db_exec(conn, """
         INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
     """, (
         cliente_id, nome_cliente, json.dumps(itens_detalhados), subtotal,
-        desconto_tipo, desconto_calculado, total, texto_formatado, observacoes
+        ajuste_tipo, ajuste_calculado, total, texto_formatado, observacoes
     ))
 
-def parse_desconto_texto(texto: str, subtotal: float):
-    """Interpreta a resposta do usuário no passo de desconto do bot.
-    Aceita 'não'/'nao'/'n'/'0' (sem desconto), '10%' (percentual) ou '10'/'r$10' (valor em R$).
-    Retorna (tipo, valor_informado) — tipo é None quando não há desconto — ou None se não entendeu."""
+def parse_ajuste_preco_texto(texto: str, subtotal: float):
+    """Interpreta a resposta do usuário no passo de ajuste de preço do bot.
+    Aceita 'não'/'nao'/'n'/'0'/'manter'/'igual' (mantém o preço igual);
+    '-10' ou '-10%' (desconto em R$ ou %); '+10' ou '+10%' (aumento em R$ ou %);
+    e, por compatibilidade, '10' ou '10%' sem sinal também é tratado como desconto.
+    Retorna (tipo, valor_informado) — tipo é None quando não há ajuste — ou None se não entendeu."""
     t = texto.strip().lower()
-    if t in ("não", "nao", "n", "0", "sem desconto", "nenhum", "pular"):
+    if t in ("não", "nao", "n", "0", "manter", "igual", "mesma coisa", "sem ajuste", "nenhum", "pular"):
         return (None, 0.0)
     t_limpo = t.replace("r$", "").strip()
+
+    sinal = None
+    if t_limpo.startswith("+"):
+        sinal = "aumento"
+        t_limpo = t_limpo[1:].strip()
+    elif t_limpo.startswith("-"):
+        sinal = "desconto"
+        t_limpo = t_limpo[1:].strip()
+    else:
+        sinal = "desconto"  # sem sinal explícito: mantém o comportamento antigo (desconto)
+
     if t_limpo.endswith("%"):
         try:
             valor = float(t_limpo[:-1].replace(",", "."))
-            return ("percentual", valor)
+            return (f"{sinal}_percentual", valor)
         except ValueError:
             return None
     try:
         valor = float(t_limpo.replace(",", "."))
-        return ("valor", valor)
+        return (f"{sinal}_valor", valor)
     except ValueError:
         return None
 
@@ -677,7 +706,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             dados = {"produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, "orc_escolha_produtos", dados)
             rodape = "Responda com o(s) número(s) dos produtos do orçamento. Pra mais de um, separe por vírgula (ex: 1,3,5)."
-            return montar_lista_numerada(produtos, "🧾 *Montar orçamento*\nQuais produtos entram?", rodape=rodape)
+            return montar_lista_numerada(produtos, "🧾 *Montar orçamento*\nQuais produtos entram?", rodape=rodape, mostrar_preco=True)
 
         # modo IA: tenta extrair da mensagem livre antes de cair no menu
         if cliente["plano"] == "ia":
@@ -1109,7 +1138,12 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "orc_qtd_item", dados)
             return f"Quantidade de *{produto['nome']}*?"
         salvar_sessao(conn, numero_autorizado_id, "orc_desconto", dados)
-        return "Quer aplicar algum desconto?\nDigite um valor em R$ (ex: 10), um percentual (ex: 10%), ou NÃO."
+        return (
+            "Quer ajustar o preço?\n"
+            "Digite um valor pra dar *desconto* (ex: 10 ou 10%), "
+            "um valor pra *aumentar* (ex: +10 ou +10%), "
+            "ou *NÃO* pra manter igual."
+        )
 
     # ── ETAPA: orçamento — desconto ──
     if etapa == "orc_desconto":
@@ -1118,12 +1152,15 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError as e:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return f"❌ {e}\n\n" + resposta_menu()
-        resultado_desconto = parse_desconto_texto(texto, subtotal_atual)
-        if resultado_desconto is None:
-            return "Não entendi. Digite um valor em R$ (ex: 10), um percentual (ex: 10%), ou NÃO."
-        desconto_tipo, desconto_valor_informado = resultado_desconto
-        dados["orc_desconto_tipo"] = desconto_tipo
-        dados["orc_desconto_valor_informado"] = desconto_valor_informado
+        resultado_ajuste = parse_ajuste_preco_texto(texto, subtotal_atual)
+        if resultado_ajuste is None:
+            return (
+                "Não entendi. Digite um valor pra *desconto* (ex: 10 ou 10%), "
+                "pra *aumento* (ex: +10 ou +10%), ou *NÃO* pra manter igual."
+            )
+        ajuste_tipo, ajuste_valor_informado = resultado_ajuste
+        dados["orc_desconto_tipo"] = ajuste_tipo
+        dados["orc_desconto_valor_informado"] = ajuste_valor_informado
         salvar_sessao(conn, numero_autorizado_id, "orc_nome_cliente", dados)
         return "Nome do cliente pra colocar no orçamento? (digite PULAR se não quiser informar)"
 
@@ -1135,23 +1172,22 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError as e:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return f"❌ {e}\n\n" + resposta_menu()
-        desconto_tipo = dados.get("orc_desconto_tipo")
-        desconto_valor_informado = dados.get("orc_desconto_valor_informado", 0.0) or 0.0
-        desconto_calculado = calcular_desconto(subtotal, desconto_tipo, desconto_valor_informado)
-        total = subtotal - desconto_calculado
+        ajuste_tipo = dados.get("orc_desconto_tipo")
+        ajuste_valor_informado = dados.get("orc_desconto_valor_informado", 0.0) or 0.0
+        ajuste_calculado = calcular_ajuste_preco(subtotal, ajuste_tipo, ajuste_valor_informado)
+        total = subtotal + ajuste_calculado
         texto_formatado = montar_texto_orcamento(
-            cliente, itens_detalhados, subtotal, desconto_tipo, desconto_calculado,
-            desconto_valor_informado, total, observacoes=None, nome_cliente=nome_cliente
+            cliente, itens_detalhados, subtotal, ajuste_tipo, ajuste_calculado,
+            ajuste_valor_informado, total, observacoes=None, nome_cliente=nome_cliente
         )
         salvar_orcamento_db(conn, cliente["id"], nome_cliente, itens_detalhados, subtotal,
-                             desconto_tipo, desconto_calculado, total, texto_formatado, None)
+                             ajuste_tipo, ajuste_calculado, total, texto_formatado, None)
         salvar_sessao(conn, numero_autorizado_id, "menu", {})
         return (
             "✅ Orçamento pronto! Copia a mensagem abaixo e encaminha pro seu cliente:\n\n"
             "━━━━━━━━━━━━━━━\n"
             f"{texto_formatado}\n"
-            "━━━━━━━━━━━━━━━\n\n"
-            + resposta_menu()
+            "━━━━━━━━━━━━━━━"
         )
 
     # fallback de segurança
@@ -1947,19 +1983,27 @@ def criar_orcamento(body: OrcamentoBody, cliente=Depends(get_current_cliente), c
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    desconto_tipo = body.desconto_tipo if body.desconto_tipo in ("valor", "percentual") else None
-    desconto_valor_informado = float(body.desconto_valor or 0)
-    desconto_calculado = calcular_desconto(subtotal, desconto_tipo, desconto_valor_informado)
-    total = subtotal - desconto_calculado
+    # aceita "valor"/"percentual" (desconto, comportamento antigo do painel) ou já
+    # "desconto_valor"/"desconto_percentual"/"aumento_valor"/"aumento_percentual"
+    tipo_bruto = body.desconto_tipo
+    if tipo_bruto in ("valor", "percentual"):
+        ajuste_tipo = f"desconto_{tipo_bruto}"
+    elif tipo_bruto in ("desconto_valor", "desconto_percentual", "aumento_valor", "aumento_percentual"):
+        ajuste_tipo = tipo_bruto
+    else:
+        ajuste_tipo = None
+    ajuste_valor_informado = float(body.desconto_valor or 0)
+    ajuste_calculado = calcular_ajuste_preco(subtotal, ajuste_tipo, ajuste_valor_informado)
+    total = subtotal + ajuste_calculado
 
     # ── Monta o texto formatado (pronto pra copiar/enviar no WhatsApp) ──
     texto_formatado = montar_texto_orcamento(
-        cliente, itens_detalhados, subtotal, desconto_tipo, desconto_calculado,
-        desconto_valor_informado, total, observacoes=body.observacoes, nome_cliente=body.nome_cliente
+        cliente, itens_detalhados, subtotal, ajuste_tipo, ajuste_calculado,
+        ajuste_valor_informado, total, observacoes=body.observacoes, nome_cliente=body.nome_cliente
     )
 
     registro = salvar_orcamento_db(conn, cliente["id"], body.nome_cliente, itens_detalhados, subtotal,
-                                    desconto_tipo, desconto_calculado, total, texto_formatado, body.observacoes)
+                                    ajuste_tipo, ajuste_calculado, total, texto_formatado, body.observacoes)
     return registro
 
 @app.get("/orcamentos")
