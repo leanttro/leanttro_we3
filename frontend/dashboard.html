@@ -1021,8 +1021,31 @@
             }
         }
 
+        async function baixarArquivo(url, nomeArquivo) {
+            try {
+                const res = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) {
+                    alert('Erro ao baixar arquivo');
+                    return;
+                }
+                const blob = await res.blob();
+                const link = document.createElement('a');
+                const objectUrl = window.URL.createObjectURL(blob);
+                link.href = objectUrl;
+                link.download = nomeArquivo;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.URL.revokeObjectURL(objectUrl);
+            } catch (err) {
+                alert('Erro ao baixar: ' + err.message);
+            }
+        }
+
         function downloadTemplateExcel() {
-            window.location.href = `${API_URL}/dashboard/template-excel`;
+            baixarArquivo(`${API_URL}/dashboard/template-excel`, 'template-produtos.xlsx');
         }
 
         function importarExcel() {
@@ -1047,11 +1070,11 @@
         }
 
         function exportarCSV() {
-            window.location.href = `${API_URL}/dashboard/export.csv`;
+            baixarArquivo(`${API_URL}/dashboard/export.csv`, 'movimentacoes.csv');
         }
 
         function exportarExcel() {
-            window.location.href = `${API_URL}/dashboard/export.excel`;
+            baixarArquivo(`${API_URL}/dashboard/export.excel`, 'movimentacoes.xlsx');
         }
 
         function atualizarResumo() {
