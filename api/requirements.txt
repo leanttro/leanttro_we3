@@ -8,3 +8,4 @@ python-multipart==0.0.9
 redis==5.0.6
 pydantic[email]==2.7.1
 openpyxl
+pandas
