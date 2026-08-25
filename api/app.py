@@ -2727,6 +2727,31 @@ def criar_coluna_modulos_clientes():
     finally:
         conn.close()
 
+def criar_coluna_movimentacao_id_materia_prima():
+    """Adiciona a coluna `movimentacao_id` (FK -> movimentacoes.id) na tabela
+    movimentacoes_materia_prima, SE ainda não existir. Necessária desde que
+    baixar_materia_prima_por_receita() passou a gravar de qual venda (movimentacao)
+    cada baixa de matéria-prima se originou, pra permitir reverter com precisão
+    (TAREFA 2 — dashboard). Mesmo padrão 'self-healing' das outras migrações —
+    ALTER TABLE ADD COLUMN IF NOT EXISTS, nunca deleta ou altera dados existentes."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            ALTER TABLE movimentacoes_materia_prima
+            ADD COLUMN IF NOT EXISTS movimentacao_id INTEGER NULL REFERENCES movimentacoes(id) ON DELETE SET NULL;
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS ix_movimentacoes_materia_prima_movimentacao_id
+            ON movimentacoes_materia_prima (movimentacao_id);
+        """)
+        conn.commit()
+        print("✅ Coluna movimentacoes_materia_prima.movimentacao_id: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar coluna movimentacoes_materia_prima.movimentacao_id: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -2740,6 +2765,7 @@ async def lifespan(app: FastAPI):
     criar_tabela_custos_fixos()
     criar_tabela_agenda_compromissos()
     criar_coluna_modulos_clientes()
+    criar_coluna_movimentacao_id_materia_prima()
     
     # 2️⃣ Testar conexão com banco
     try:
