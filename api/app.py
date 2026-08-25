@@ -53,7 +53,7 @@ MENU_TEXTO = (
     "7️⃣ Visão geral do estoque\n"
     "8️⃣ Configurar resumo automático\n"
     "9️⃣ Definir Matéria-Prima\n"
-    "🔟 Editar Estoque\n"
+    "🔟 Editar Estoque ou dados do Produto\n"
     "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
     "0️⃣ Abrir menu\n\n"
     "Responda com o número da opção."
@@ -72,7 +72,8 @@ TEXTO_AJUDA = (
     "7️⃣ *Visão geral* — lista todos os produtos e matérias-primas com o estoque atual.\n"
     "8️⃣ *Resumo automático* — escolha até 2 horários por dia pra receber o resumo (opção 5) sem precisar pedir.\n"
     "9️⃣ *Definir Matéria-Prima* — define quais matérias-primas (e quantidades) um produto consome (monta a receita).\n"
-    "🔟 *Editar Estoque* — corrige o estoque de um produto pro valor exato que você digitar.\n"
+    "🔟 *Editar Estoque ou dados do Produto* — corrige o estoque (quantidade) de um ou mais produtos de uma vez, "
+    "ou edita nome, custo unitário, preço de venda e/ou SKU de um produto específico.\n"
     "1️⃣1️⃣ *Ajuda* — este texto que você está lendo agora.\n\n"
     "A qualquer momento, digite *menu* ou *0* para voltar aqui."
 )
