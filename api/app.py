@@ -35,9 +35,9 @@ GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
 TIMEZONE_PADRAO = ZoneInfo("America/Sao_Paulo")
 
 GROQ_MODELOS_FALLBACK = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
-    "gemma2-9b-it",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
 ]
 
 # Ordem lógica atualizada pelo cliente. Os números aqui precisam bater com o
@@ -592,6 +592,7 @@ Se a mensagem não for sobre estoque/venda, responda: {"tipo": null}
 
 async def chamar_groq_json(texto_usuario: str, groq_key: str) -> Optional[dict]:
     if not groq_key:
+        print("⚠️ GROQ: nenhuma chave configurada (env var vazia)")
         return None
     messages = [
         {"role": "system", "content": PROMPT_EXTRACAO},
@@ -604,13 +605,16 @@ async def chamar_groq_json(texto_usuario: str, groq_key: str) -> Optional[dict]:
             try:
                 resp = await client.post(GROQ_API_URL, headers=headers, json=payload)
                 if resp.status_code != 200:
+                    print(f"⚠️ GROQ [{modelo}] status {resp.status_code}: {resp.text[:300]}")
                     continue
                 data = resp.json()
                 bruto = data["choices"][0]["message"]["content"].strip()
                 bruto = re.sub(r"^```json|```$", "", bruto, flags=re.MULTILINE).strip()
                 return json.loads(bruto)
-            except Exception:
+            except Exception as e:
+                print(f"⚠️ GROQ [{modelo}] exceção: {e}")
                 continue
+    print("⚠️ GROQ: todos os modelos falharam")
     return None
 
 async def enviar_whatsapp(destino: str, texto: str):
