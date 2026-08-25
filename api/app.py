@@ -247,6 +247,16 @@ class ClienteNegocioBody(BaseModel):
     nome: str
     telefone: Optional[str] = None
 
+class CustoFixoBody(BaseModel):
+    nome_da_conta: str
+    valor: float
+
+class CalculadoraCustoBody(BaseModel):
+    produto_id: Optional[int] = None       # se informado e custo_variavel não vier, usa o custo_unitario do produto
+    custo_variavel: Optional[float] = 0    # custo variável por unidade, informado manualmente
+    volume_esperado: float                 # volume de vendas esperado por mês
+    margem: Optional[float] = None         # margem de lucro desejada em % (padrão 30%)
+
 # ─────────────────────────────────────────
 #  HELPERS DE NEGÓCIO
 # ─────────────────────────────────────────
@@ -512,11 +522,12 @@ def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tip
     valor_unitario = float(valor_unitario or 0)
     valor_total = round(quantidade * valor_unitario, 2)
 
-    db_exec(conn, """
+    mov = db_exec(conn, """
         INSERT INTO movimentacoes
             (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original, cliente_negocio_id)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
     """, (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original, cliente_negocio_id))
+    movimentacao_id = mov["id"] if mov else None
 
     alertas = []
     if tipo == "entrada":
@@ -529,7 +540,9 @@ def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tip
         if tipo == "venda":
             # Toda venda de um produto que tem receita cadastrada desconta
             # automaticamente a matéria-prima usada (ficha técnica / BOM).
-            alertas = baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade, origem)
+            # Passa o movimentacao_id pra poder reverter isso com precisão depois (TAREFA 2 — dashboard).
+            alertas = baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade, origem,
+                                                        movimentacao_id=movimentacao_id)
     elif tipo == "ajuste":
         db_exec(conn, "UPDATE produtos SET estoque_atual = %s WHERE id = %s", (quantidade, produto_id))
 
@@ -540,7 +553,7 @@ def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tip
 # ─────────────────────────────────────────
 def aplicar_movimentacao_materia_prima(conn, cliente_id, materia_prima_id, numero_autorizado_id, tipo,
                                         quantidade, valor_unitario, origem, mensagem_original=None,
-                                        produto_id_origem=None):
+                                        produto_id_origem=None, movimentacao_id=None):
     quantidade = float(quantidade)
     valor_unitario = float(valor_unitario or 0)
     valor_total = round(quantidade * valor_unitario, 2)
@@ -548,10 +561,10 @@ def aplicar_movimentacao_materia_prima(conn, cliente_id, materia_prima_id, numer
     db_exec(conn, """
         INSERT INTO movimentacoes_materia_prima
             (cliente_id, materia_prima_id, numero_autorizado_id, tipo, quantidade, valor_unitario,
-             valor_total, origem, mensagem_original, produto_id_origem)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+             valor_total, origem, mensagem_original, produto_id_origem, movimentacao_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (cliente_id, materia_prima_id, numero_autorizado_id, tipo, quantidade, valor_unitario,
-          valor_total, origem, mensagem_original, produto_id_origem))
+          valor_total, origem, mensagem_original, produto_id_origem, movimentacao_id))
 
     if tipo == "entrada":
         db_exec(conn, "UPDATE materias_primas SET estoque_atual = estoque_atual + %s, custo_unitario = %s WHERE id = %s",
@@ -574,10 +587,12 @@ def aplicar_movimentacao_materia_prima(conn, cliente_id, materia_prima_id, numer
 
     return valor_total, alerta
 
-def baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade_vendida, origem):
+def baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autorizado_id, quantidade_vendida, origem, movimentacao_id=None):
     """Ao vender 1 ou mais unidades de um produto, desconta a matéria-prima
     de cada item da receita cadastrada, proporcionalmente à quantidade vendida.
     Produtos sem receita cadastrada simplesmente não têm nenhum item aqui.
+    `movimentacao_id`, quando informado, fica gravado em cada baixa pra permitir
+    reverter tudo com precisão depois (TAREFA 2 — excluir venda no dashboard).
     Retorna a lista de alertas de estoque baixo disparados (pode ser vazia)."""
     itens = db_all(conn, """
         SELECT r.materia_prima_id, r.quantidade_necessaria, m.custo_unitario
@@ -591,7 +606,7 @@ def baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autori
         _, alerta = aplicar_movimentacao_materia_prima(
             conn, cliente_id, item["materia_prima_id"], numero_autorizado_id,
             "baixa_receita", qtd_baixa, item["custo_unitario"],
-            origem=origem, produto_id_origem=produto_id
+            origem=origem, produto_id_origem=produto_id, movimentacao_id=movimentacao_id
         )
         if alerta:
             alertas.append(alerta)
@@ -2213,6 +2228,29 @@ def criar_tabela_clientes_negocio():
     finally:
         conn.close()
 
+def criar_tabela_custos_fixos():
+    """Cria a tabela custos_fixos (TAREFA 5) no startup SE ainda não existir.
+    Mesmo padrão 'self-healing' das outras tabelas novas: usa IF NOT EXISTS,
+    nunca deleta ou altera dados existentes."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS custos_fixos (
+                id             SERIAL PRIMARY KEY,
+                cliente_id     INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                nome_da_conta  TEXT NOT NULL,
+                valor          NUMERIC NOT NULL DEFAULT 0,
+                atualizado_em  TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """)
+        conn.commit()
+        print("✅ Tabela custos_fixos: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela custos_fixos: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -2223,6 +2261,7 @@ async def lifespan(app: FastAPI):
     criar_tabelas_agendamentos()
     criar_tabelas_orcamentos()
     criar_tabela_clientes_negocio()
+    criar_tabela_custos_fixos()
     
     # 2️⃣ Testar conexão com banco
     try:
@@ -2527,10 +2566,11 @@ def listar_movimentacoes(
     cliente=Depends(get_current_cliente), conn=Depends(get_db)
 ):
     sql = """
-        SELECT m.*, p.nome AS produto_nome, n.nome AS registrado_por
+        SELECT m.*, p.nome AS produto_nome, n.nome AS registrado_por, cn.nome AS cliente_negocio_nome
         FROM movimentacoes m
         JOIN produtos p ON p.id = m.produto_id
         LEFT JOIN numeros_autorizados n ON n.id = m.numero_autorizado_id
+        LEFT JOIN clientes_negocio cn ON cn.id = m.cliente_negocio_id
         WHERE m.cliente_id = %s
     """
     params = [cliente["id"]]
@@ -2544,6 +2584,38 @@ def listar_movimentacoes(
         sql += " AND m.criado_em::date <= %s"; params.append(ate)
     sql += " ORDER BY m.criado_em DESC LIMIT 500"
     return db_all(conn, sql, tuple(params))
+
+@app.delete("/movimentacoes/{movimentacao_id}")
+def deletar_movimentacao(movimentacao_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """TAREFA 2 — exclui uma venda registrada revertendo o efeito dela no estoque:
+    devolve a quantidade vendida ao produto e, se o produto tinha receita (ficha
+    técnica), devolve também a matéria-prima que tinha sido baixada automaticamente.
+    Só funciona para movimentações do tipo 'venda' — outros tipos (entrada, saída,
+    ajuste) continuam sem exclusão pelo painel, pra não abrir brecha de descontrole
+    de estoque em fluxos que não foram pedidos aqui."""
+    mov = db_one(conn, "SELECT * FROM movimentacoes WHERE id = %s AND cliente_id = %s",
+                 (movimentacao_id, cliente["id"]))
+    if not mov:
+        raise HTTPException(status_code=404, detail="Movimentação não encontrada")
+    if mov["tipo"] != "venda":
+        raise HTTPException(status_code=400, detail="Só é possível excluir movimentações do tipo venda por aqui")
+
+    # 1) Devolve a matéria-prima baixada automaticamente pela receita (se houver)
+    baixas_mp = db_all(conn, "SELECT * FROM movimentacoes_materia_prima WHERE movimentacao_id = %s",
+                        (movimentacao_id,))
+    for baixa in baixas_mp:
+        db_exec(conn, "UPDATE materias_primas SET estoque_atual = estoque_atual + %s WHERE id = %s",
+                (baixa["quantidade"], baixa["materia_prima_id"]))
+    if baixas_mp:
+        db_exec(conn, "DELETE FROM movimentacoes_materia_prima WHERE movimentacao_id = %s", (movimentacao_id,))
+
+    # 2) Devolve a quantidade vendida ao estoque do produto
+    db_exec(conn, "UPDATE produtos SET estoque_atual = estoque_atual + %s WHERE id = %s",
+            (mov["quantidade"], mov["produto_id"]))
+
+    # 3) Remove o registro da venda
+    db_exec(conn, "DELETE FROM movimentacoes WHERE id = %s", (movimentacao_id,))
+    return {"ok": True}
 
 @app.post("/movimentacoes")
 def criar_movimentacao_manual(body: MovimentacaoManualBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
@@ -2596,6 +2668,141 @@ def historico_cliente_negocio(cliente_negocio_id: int, cliente=Depends(get_curre
 
     historico = sorted(orcamentos + vendas, key=lambda r: r["criado_em"], reverse=True)
     return {"cliente": cliente_negocio, "historico": historico}
+
+@app.put("/clientes-negocio/{cliente_negocio_id}")
+def atualizar_cliente_negocio(cliente_negocio_id: int, body: ClienteNegocioBody,
+                               cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """TAREFA 4 — edita nome/telefone de um cliente do negócio."""
+    cliente_negocio = db_one(conn, "SELECT * FROM clientes_negocio WHERE id = %s AND cliente_id = %s",
+                              (cliente_negocio_id, cliente["id"]))
+    if not cliente_negocio:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    telefone = re.sub(r"\D", "", body.telefone) if body.telefone else None
+    if telefone:
+        existente = db_one(conn, """
+            SELECT * FROM clientes_negocio WHERE cliente_id = %s AND telefone = %s AND id != %s
+        """, (cliente["id"], telefone, cliente_negocio_id))
+        if existente:
+            raise HTTPException(status_code=400, detail="Já existe um cliente com esse telefone")
+
+    db_exec(conn, "UPDATE clientes_negocio SET nome = %s, telefone = %s WHERE id = %s",
+            (body.nome, telefone, cliente_negocio_id))
+    return {"ok": True}
+
+@app.delete("/clientes-negocio/{cliente_negocio_id}")
+def deletar_cliente_negocio(cliente_negocio_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """TAREFA 4 — exclui o cliente do negócio SEM apagar vendas/orçamentos antigos:
+    apenas desvincula (cliente_negocio_id = NULL) pra manter o histórico intacto."""
+    cliente_negocio = db_one(conn, "SELECT * FROM clientes_negocio WHERE id = %s AND cliente_id = %s",
+                              (cliente_negocio_id, cliente["id"]))
+    if not cliente_negocio:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    db_exec(conn, "UPDATE movimentacoes SET cliente_negocio_id = NULL WHERE cliente_negocio_id = %s",
+            (cliente_negocio_id,))
+    db_exec(conn, "UPDATE orcamentos SET cliente_negocio_id = NULL WHERE cliente_negocio_id = %s",
+            (cliente_negocio_id,))
+    db_exec(conn, "DELETE FROM clientes_negocio WHERE id = %s", (cliente_negocio_id,))
+    return {"ok": True}
+
+# ═════════════════════════════════════════
+#  CUSTOS FIXOS + CALCULADORA DE PREÇO (painel do cliente) — TAREFA 5
+# ═════════════════════════════════════════
+@app.get("/custos-fixos")
+def listar_custos_fixos(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    return db_all(conn, "SELECT * FROM custos_fixos WHERE cliente_id = %s ORDER BY nome_da_conta",
+                  (cliente["id"],))
+
+@app.post("/custos-fixos")
+def criar_custo_fixo(body: CustoFixoBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    return db_exec(conn, """
+        INSERT INTO custos_fixos (cliente_id, nome_da_conta, valor, atualizado_em)
+        VALUES (%s,%s,%s,NOW()) RETURNING *
+    """, (cliente["id"], body.nome_da_conta, body.valor))
+
+@app.get("/custos-fixos/export.csv")
+def export_custos_fixos_csv(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    linhas = db_all(conn, """
+        SELECT nome_da_conta, valor, atualizado_em FROM custos_fixos
+        WHERE cliente_id = %s ORDER BY nome_da_conta
+    """, (cliente["id"],))
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Conta", "Valor", "Atualizado em"])
+    for l in linhas:
+        writer.writerow([l["nome_da_conta"], l["valor"], l["atualizado_em"]])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=custos-fixos.csv"}
+    )
+
+@app.get("/custos-fixos/export.excel")
+def export_custos_fixos_excel(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    linhas = db_all(conn, """
+        SELECT nome_da_conta, valor, atualizado_em FROM custos_fixos
+        WHERE cliente_id = %s ORDER BY nome_da_conta
+    """, (cliente["id"],))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Custos Fixos"
+    ws.append(["Conta", "Valor", "Atualizado em"])
+    for l in linhas:
+        ws.append([l["nome_da_conta"], l["valor"], l["atualizado_em"]])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=custos-fixos.xlsx"}
+    )
+
+@app.post("/custos-fixos/calculadora")
+def calcular_preco_com_custos_fixos(body: CalculadoraCustoBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Calculadora de preço do dashboard: usa o total de custos fixos JÁ SALVO no
+    banco (soma da tabela custos_fixos) em vez de pedir pra redigitar tudo de novo,
+    diferente de como funciona hoje no bot do WhatsApp. Reaproveita a mesma fórmula
+    de `calcular_resultado_calculadora`."""
+    custo_variavel = float(body.custo_variavel or 0)
+    if body.produto_id:
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                          (body.produto_id, cliente["id"]))
+        if not produto:
+            raise HTTPException(status_code=404, detail="Produto não encontrado")
+        if not custo_variavel:
+            custo_variavel = float(produto["custo_unitario"] or 0)
+
+    total_fixo = db_one(conn, "SELECT COALESCE(SUM(valor),0) AS total FROM custos_fixos WHERE cliente_id = %s",
+                         (cliente["id"],))
+    custo_fixo_mensal = float(total_fixo["total"])
+
+    dados = {
+        "custo_variavel": custo_variavel,
+        "calc_custo_fixo_mensal": custo_fixo_mensal,
+        "calc_volume_esperado": body.volume_esperado,
+        "calc_margem": body.margem if body.margem is not None else 30.0,
+    }
+    resultado = calcular_resultado_calculadora(dados)
+    resultado["custo_fixo_mensal_total"] = round(custo_fixo_mensal, 2)
+    return resultado
+
+@app.put("/custos-fixos/{custo_id}")
+def atualizar_custo_fixo(custo_id: int, body: CustoFixoBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    custo = db_one(conn, "SELECT * FROM custos_fixos WHERE id = %s AND cliente_id = %s", (custo_id, cliente["id"]))
+    if not custo:
+        raise HTTPException(status_code=404, detail="Custo fixo não encontrado")
+    db_exec(conn, "UPDATE custos_fixos SET nome_da_conta = %s, valor = %s, atualizado_em = NOW() WHERE id = %s",
+            (body.nome_da_conta, body.valor, custo_id))
+    return {"ok": True}
+
+@app.delete("/custos-fixos/{custo_id}")
+def deletar_custo_fixo(custo_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    custo = db_one(conn, "SELECT * FROM custos_fixos WHERE id = %s AND cliente_id = %s", (custo_id, cliente["id"]))
+    if not custo:
+        raise HTTPException(status_code=404, detail="Custo fixo não encontrado")
+    db_exec(conn, "DELETE FROM custos_fixos WHERE id = %s", (custo_id,))
+    return {"ok": True}
 
 @app.get("/dashboard/resumo")
 def dashboard_resumo(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
