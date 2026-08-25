@@ -155,7 +155,7 @@
 
         .table-header {
             display: grid;
-            grid-template-columns: 1.6fr 1.6fr 1fr 1fr 1.4fr;
+            grid-template-columns: 1.6fr 1.6fr 1fr 1.1fr 1fr 1.4fr;
             gap: 15px;
             padding: 15px 20px;
             background: #f8f9fa;
@@ -169,12 +169,29 @@
 
         .table-row {
             display: grid;
-            grid-template-columns: 1.6fr 1.6fr 1fr 1fr 1.4fr;
+            grid-template-columns: 1.6fr 1.6fr 1fr 1.1fr 1fr 1.4fr;
             gap: 15px;
             padding: 15px 20px;
             border-bottom: 1px solid #f0f0f0;
             align-items: center;
             font-size: 14px;
+        }
+
+        .modulos-toggle {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+        }
+        .modulos-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: #555;
+        }
+        .modulos-toggle input[type="checkbox"] {
+            cursor: pointer;
         }
 
         .table-row:last-child { border-bottom: none; }
@@ -340,6 +357,7 @@
                 <div>Negócio / Email</div>
                 <div>Números autorizados</div>
                 <div>Plano</div>
+                <div>Módulos</div>
                 <div>Status</div>
                 <div>Ações</div>
             </div>
@@ -375,6 +393,14 @@
                     <option value="formulario">Formulário (sem IA)</option>
                     <option value="ia">IA (Groq)</option>
                 </select>
+            </div>
+
+            <div class="form-group">
+                <label>Módulos ativos</label>
+                <div class="modulos-toggle">
+                    <label><input type="checkbox" id="novoModuloEstoque" checked> 📦 Estoque</label>
+                    <label><input type="checkbox" id="novoModuloAgenda"> 📅 Agenda</label>
+                </div>
             </div>
 
             <div class="modal-actions">
@@ -480,6 +506,10 @@
                     `).join('')
                     : '<span style="color:#bbb;">nenhum número</span>';
 
+                const modulosAtuais = (c.modulos && c.modulos.length) ? c.modulos : ['estoque'];
+                const temEstoque = modulosAtuais.includes('estoque');
+                const temAgenda = modulosAtuais.includes('agenda');
+
                 return `
                     <div class="table-row">
                         <div>
@@ -495,6 +525,10 @@
                                 <option value="formulario" ${c.plano === 'formulario' ? 'selected' : ''}>Formulário</option>
                                 <option value="ia" ${c.plano === 'ia' ? 'selected' : ''}>IA</option>
                             </select>
+                        </div>
+                        <div class="modulos-toggle">
+                            <label><input type="checkbox" ${temEstoque ? 'checked' : ''} onchange="toggleModulo(${c.id}, 'estoque', this.checked)"> 📦 Estoque</label>
+                            <label><input type="checkbox" ${temAgenda ? 'checked' : ''} onchange="toggleModulo(${c.id}, 'agenda', this.checked)"> 📅 Agenda</label>
                         </div>
                         <div>
                             <span class="badge ${c.ativo ? 'badge-ok' : 'badge-off'}">${c.ativo ? 'Ativo' : 'Inativo'}</span>
@@ -519,6 +553,8 @@
             document.getElementById('novoEmail').value = '';
             document.getElementById('novaSenha').value = '';
             document.getElementById('novoPlano').value = 'formulario';
+            document.getElementById('novoModuloEstoque').checked = true;
+            document.getElementById('novoModuloAgenda').checked = false;
         }
 
         async function salvarCliente() {
@@ -526,9 +562,16 @@
             const email = document.getElementById('novoEmail').value.trim();
             const senha = document.getElementById('novaSenha').value;
             const plano = document.getElementById('novoPlano').value;
+            const modulos = [];
+            if (document.getElementById('novoModuloEstoque').checked) modulos.push('estoque');
+            if (document.getElementById('novoModuloAgenda').checked) modulos.push('agenda');
 
             if (!nome_negocio || !email || !senha) {
                 showToast('Preencha nome, email e senha.', true);
+                return;
+            }
+            if (!modulos.length) {
+                showToast('Marque ao menos um módulo (Estoque ou Agenda).', true);
                 return;
             }
 
@@ -536,7 +579,7 @@
                 const res = await apiFetch('/admin/clientes', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nome_negocio, email, senha, plano })
+                    body: JSON.stringify({ nome_negocio, email, senha, plano, modulos })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || 'Erro ao criar cliente');
@@ -561,6 +604,33 @@
                 carregarClientes();
             } catch (err) {
                 showToast(err.message, true);
+            }
+        }
+
+        async function toggleModulo(clienteId, modulo, marcado) {
+            const cliente = clientes.find(c => c.id === clienteId);
+            const atuais = new Set((cliente && cliente.modulos && cliente.modulos.length) ? cliente.modulos : ['estoque']);
+            if (marcado) atuais.add(modulo); else atuais.delete(modulo);
+
+            if (!atuais.size) {
+                showToast('O cliente precisa ter ao menos um módulo ativo.', true);
+                carregarClientes(); // desfaz o toggle visualmente
+                return;
+            }
+
+            try {
+                const res = await apiFetch(`/admin/clientes/${clienteId}/modulos`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ modulos: Array.from(atuais) })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Erro ao atualizar módulos');
+                showToast('Módulos atualizados.');
+                carregarClientes();
+            } catch (err) {
+                showToast(err.message, true);
+                carregarClientes();
             }
         }
 
