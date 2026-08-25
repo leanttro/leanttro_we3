@@ -56,6 +56,7 @@ MENU_TEXTO = (
     "🔟 Editar Estoque ou dados do Produto\n"
     "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
     "1️⃣2️⃣ Calculadora de custos fixos\n"
+    "1️⃣3️⃣ Agenda / Compromissos\n"
     "0️⃣ Abrir menu\n\n"
     "Responda com o número da opção."
 )
@@ -82,9 +83,65 @@ TEXTO_AJUDA = (
     "e mostra o total, com a lista de cada conta. É diferente da calculadora que aparece durante o cadastro "
     "de produto (opção 3): aquela usa o custo fixo pra sugerir o preço de venda de UM produto específico "
     "(rateando o custo fixo pelo volume esperado e aplicando uma margem de lucro); esta aqui é só uma soma "
-    "simples das contas, sem gerar preço de produto nenhum.\n\n"
+    "simples das contas, sem gerar preço de produto nenhum.\n"
+    "1️⃣3️⃣ *Agenda / Compromissos* — crie compromissos (com ou sem vínculo a um cliente), veja os compromissos "
+    "de hoje ou da semana, ou cancele um compromisso. Se você configurar um lembrete, recebe um aviso por "
+    "WhatsApp X minutos antes do horário marcado.\n\n"
     "A qualquer momento, digite *menu* ou *0* para voltar aqui."
 )
+
+# ─────────────────────────────────────────
+#  MÓDULOS POR CLIENTE (estoque / agenda)
+# ─────────────────────────────────────────
+# MENU_TEXTO acima é o menu completo (estoque + item 13 de agenda). Quando o
+# cliente só tem o módulo "estoque" ativo, usamos a versão sem o item 13 pra
+# não poluir o menu com uma opção que ele não tem.
+MENU_TEXTO_SEM_AGENDA = MENU_TEXTO.replace("1️⃣3️⃣ Agenda / Compromissos\n", "")
+
+AGENDA_MENU_TEXTO = (
+    "📅 *Agenda*\n"
+    "1 - Criar compromisso\n"
+    "2 - Compromissos de hoje\n"
+    "3 - Compromissos da semana\n"
+    "4 - Cancelar um compromisso\n\n"
+    "Responda com o número."
+)
+
+TEXTO_ESCOLHER_MODULO = (
+    "👋 O que você quer fazer?\n"
+    "1️⃣ 📦 Estoque\n"
+    "2️⃣ 📅 Agenda\n\n"
+    "Responda com o número."
+)
+
+def obter_modulos_cliente(cliente: dict) -> list:
+    """Módulos ativos do cliente (['estoque'], ['agenda'] ou ambos).
+    Nullable no banco — sem valor definido, cai no default 'estoque' pra não
+    quebrar clientes que já existiam antes desse conceito existir."""
+    modulos = cliente.get("modulos")
+    if not modulos:
+        return ["estoque"]
+    return list(modulos)
+
+def etapa_raiz_para_modulos(modulos: list) -> str:
+    """Se o cliente tem só 1 módulo ativo, vai direto pro menu daquele módulo
+    (sem forçar escolha). Se tem os 2, primeiro escolhe qual módulo usar."""
+    tem_estoque = "estoque" in modulos
+    tem_agenda = "agenda" in modulos
+    if tem_estoque and tem_agenda:
+        return "escolher_modulo"
+    if tem_agenda and not tem_estoque:
+        return "agenda_menu"
+    return "menu"
+
+def texto_raiz_para_modulos(modulos: list) -> str:
+    tem_estoque = "estoque" in modulos
+    tem_agenda = "agenda" in modulos
+    if tem_estoque and tem_agenda:
+        return TEXTO_ESCOLHER_MODULO
+    if tem_agenda and not tem_estoque:
+        return AGENDA_MENU_TEXTO
+    return MENU_TEXTO_SEM_AGENDA
 
 # ─────────────────────────────────────────
 #  BANCO
@@ -169,9 +226,13 @@ class AdminCriarClienteBody(BaseModel):
     email: str
     senha: str
     plano: str = "formulario"  # formulario | ia
+    modulos: Optional[list[str]] = None  # estoque | agenda — default ['estoque']
 
 class AdminPlanoBody(BaseModel):
     plano: str
+
+class AdminModulosBody(BaseModel):
+    modulos: list[str]  # subconjunto de: estoque, agenda
 
 class AdminAtivoBody(BaseModel):
     ativo: bool
@@ -250,6 +311,20 @@ class ClienteNegocioBody(BaseModel):
 class CustoFixoBody(BaseModel):
     nome_da_conta: str
     valor: float
+
+class AgendaCompromissoBody(BaseModel):
+    titulo: str
+    data: str  # ISO format: YYYY-MM-DD
+    hora_inicio: str  # HH:MM
+    hora_fim: Optional[str] = None       # HH:MM — se ausente, usa duracao_minutos (ou 30min padrão)
+    duracao_minutos: Optional[int] = None
+    cliente_negocio_id: Optional[int] = None  # vínculo opcional com clientes_negocio
+    notas: Optional[str] = None
+    lembrete_minutos_antes: Optional[int] = None  # se None, sem lembrete
+    status: Optional[str] = "agendado"  # agendado | concluido | cancelado
+
+class AgendaStatusBody(BaseModel):
+    status: str  # agendado | concluido | cancelado
 
 class CalculadoraCustoBody(BaseModel):
     produto_id: Optional[int] = None       # se informado e custo_variavel não vier, usa o custo_unitario do produto
@@ -647,6 +722,123 @@ def buscar_ou_criar_cliente_negocio(conn, cliente_id: int, texto: str):
     """, (cliente_id, texto))
 
 # ─────────────────────────────────────────
+#  AGENDA / COMPROMISSOS
+# ─────────────────────────────────────────
+def parse_data_br(texto: str):
+    """Aceita 'DD/MM' ou 'DD/MM/AAAA' (ano opcional, assume o ano corrente).
+    Retorna um date ou None se inválido."""
+    texto = texto.strip()
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", texto)
+    if not m:
+        return None
+    dia, mes, ano = int(m.group(1)), int(m.group(2)), m.group(3)
+    hoje = datetime.now(TIMEZONE_PADRAO).date()
+    if ano:
+        ano = int(ano)
+        if ano < 100:
+            ano += 2000
+    else:
+        ano = hoje.year
+    try:
+        return datetime(ano, mes, dia).date()
+    except ValueError:
+        return None
+
+def calcular_hora_fim(hora_inicio_str: str, hora_fim_str: str = None, duracao_minutos: int = None) -> str:
+    """Recebe 'HH:MM'. Se hora_fim_str vier preenchida, usa ela direto. Senão,
+    soma duracao_minutos (ou 30min padrão) à hora_inicio e devolve 'HH:MM'."""
+    if hora_fim_str:
+        return hora_fim_str[:5]
+    h, m = map(int, hora_inicio_str[:5].split(":"))
+    dur = int(duracao_minutos) if duracao_minutos else 30
+    fim_min = (h * 60 + m + dur) % (24 * 60)
+    return f"{fim_min // 60:02d}:{fim_min % 60:02d}"
+
+def _horarios_se_sobrepoem(ini1: str, fim1: str, ini2: str, fim2: str) -> bool:
+    def to_min(s):
+        h, m = map(int, str(s)[:5].split(":"))
+        return h * 60 + m
+    return to_min(ini1) < to_min(fim2) and to_min(ini2) < to_min(fim1)
+
+def listar_compromissos_dia(conn, cliente_id: int, data):
+    return db_all(conn, """
+        SELECT a.*, cn.nome AS cliente_negocio_nome
+        FROM agenda_compromissos a
+        LEFT JOIN clientes_negocio cn ON cn.id = a.cliente_negocio_id
+        WHERE a.cliente_id = %s AND a.data = %s AND a.status != 'cancelado'
+        ORDER BY a.hora_inicio
+    """, (cliente_id, data))
+
+def verificar_conflito_agenda(conn, cliente_id: int, data, hora_inicio: str, hora_fim: str, excluir_id: int = None):
+    """Checa (sem bloquear) se já existe outro compromisso não-cancelado do mesmo
+    cliente, no mesmo dia, cujo horário se sobrepõe. Retorna a lista de conflitos."""
+    existentes = listar_compromissos_dia(conn, cliente_id, data)
+    conflitos = []
+    for c in existentes:
+        if excluir_id and c["id"] == excluir_id:
+            continue
+        fim_existente = calcular_hora_fim(str(c["hora_inicio"])[:5], str(c["hora_fim"])[:5] if c["hora_fim"] else None)
+        if _horarios_se_sobrepoem(hora_inicio, hora_fim, str(c["hora_inicio"])[:5], fim_existente):
+            conflitos.append(c)
+    return conflitos
+
+def listar_clientes_negocio_cliente(conn, cliente_id: int):
+    return db_all(conn, "SELECT id, nome FROM clientes_negocio WHERE cliente_id = %s ORDER BY nome", (cliente_id,))
+
+def listar_compromissos_futuros_cliente(conn, cliente_id: int):
+    hoje = datetime.now(TIMEZONE_PADRAO).date()
+    return db_all(conn, """
+        SELECT * FROM agenda_compromissos
+        WHERE cliente_id = %s AND status = 'agendado' AND data >= %s
+        ORDER BY data, hora_inicio
+    """, (cliente_id, hoje))
+
+def texto_lista_compromissos_periodo(conn, cliente_id: int, dias: int) -> str:
+    """dias=0 -> só hoje; dias=7 -> hoje até +7 dias (semana)."""
+    hoje = datetime.now(TIMEZONE_PADRAO).date()
+    fim = hoje + timedelta(days=dias)
+    compromissos = db_all(conn, """
+        SELECT a.*, cn.nome AS cliente_negocio_nome
+        FROM agenda_compromissos a
+        LEFT JOIN clientes_negocio cn ON cn.id = a.cliente_negocio_id
+        WHERE a.cliente_id = %s AND a.status = 'agendado' AND a.data BETWEEN %s AND %s
+        ORDER BY a.data, a.hora_inicio
+    """, (cliente_id, hoje, fim))
+    titulo = "📅 *Compromissos de hoje*" if dias == 0 else "📅 *Compromissos da semana*"
+    if not compromissos:
+        return f"{titulo}\n\nNenhum compromisso."
+    linhas = [titulo, ""]
+    for c in compromissos:
+        linha = f"- {c['data'].strftime('%d/%m')} {str(c['hora_inicio'])[:5]} — {c['titulo']}"
+        if c.get("cliente_negocio_nome"):
+            linha += f" ({c['cliente_negocio_nome']})"
+        linhas.append(linha)
+    return "\n".join(linhas)
+
+def montar_resumo_agenda_confirmacao(conn, cliente_id: int, dados: dict) -> str:
+    data_obj = datetime.fromisoformat(dados["agenda_data"]).date()
+    hora_inicio = dados["agenda_hora"]
+    hora_fim = calcular_hora_fim(hora_inicio)
+    linhas = [
+        "Confirma o compromisso?", "",
+        f"📌 {dados['agenda_titulo']}",
+        f"📅 {data_obj.strftime('%d/%m/%Y')} às {hora_inicio}",
+    ]
+    if dados.get("agenda_cliente_negocio_nome"):
+        linhas.append(f"👤 {dados['agenda_cliente_negocio_nome']}")
+    if dados.get("agenda_lembrete_minutos"):
+        linhas.append(f"⏰ Lembrete {dados['agenda_lembrete_minutos']} min antes")
+    conflitos = verificar_conflito_agenda(conn, cliente_id, data_obj, hora_inicio, hora_fim)
+    if conflitos:
+        linhas.append("")
+        linhas.append("⚠️ Já existe outro compromisso nesse horário:")
+        for c in conflitos:
+            linhas.append(f"- {c['titulo']} ({str(c['hora_inicio'])[:5]})")
+    linhas.append("")
+    linhas.append("Responda SIM ou NÃO.")
+    return "\n".join(linhas)
+
+# ─────────────────────────────────────────
 #  CALCULADORA DE CUSTO/PREÇO (TAREFA 1)
 # ─────────────────────────────────────────
 def calcular_resultado_calculadora(dados: dict) -> dict:
@@ -908,7 +1100,13 @@ async def enviar_whatsapp(destino: str, texto: str):
 # ─────────────────────────────────────────
 ETAPAS_TIPO = {"entrada": "entrada", "venda": "venda", "saida": "saida", "ajuste": "ajuste"}
 
-def resposta_menu():
+def resposta_menu(modulos=None):
+    """modulos=None mantém o comportamento antigo (menu completo), usado nos
+    pontos internos das etapas do módulo estoque, que só são alcançáveis por
+    quem já tem esse módulo ativo. Quando modulos é passado explicitamente e
+    não inclui 'agenda', o item 13 (Agenda) é omitido."""
+    if modulos is not None and "agenda" not in modulos:
+        return MENU_TEXTO_SEM_AGENDA
     return MENU_TEXTO
 
 async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: str) -> str:
@@ -917,10 +1115,22 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
     etapa = sessao["etapa_atual"]
     dados = sessao["dados_parciais"] if isinstance(sessao["dados_parciais"], dict) else json.loads(sessao["dados_parciais"] or "{}")
     texto_low = texto.strip().lower()
+    modulos = obter_modulos_cliente(cliente)
 
     if texto_low in ("menu", "cancelar", "0"):
-        salvar_sessao(conn, numero_autorizado_id, "menu", {})
-        return resposta_menu()
+        etapa_raiz = etapa_raiz_para_modulos(modulos)
+        salvar_sessao(conn, numero_autorizado_id, etapa_raiz, {})
+        return texto_raiz_para_modulos(modulos)
+
+    # ── ETAPA: escolher módulo (só aparece pra cliente com estoque + agenda ativos) ──
+    if etapa == "escolher_modulo":
+        if texto.strip() == "1" and "estoque" in modulos:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return resposta_menu(modulos)
+        if texto.strip() == "2" and "agenda" in modulos:
+            salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+            return AGENDA_MENU_TEXTO
+        return TEXTO_ESCOLHER_MODULO
 
     # ── ETAPA: MENU ──
     if etapa == "menu":
@@ -942,6 +1152,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                 "Manda o nome e o valor de cada conta (ex: Aluguel 2000). Digite PRONTO quando terminar."
             )
 
+        if texto.strip() == "13" and "agenda" in modulos:
+            salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+            return (
+                "📅 *Agenda*\n"
+                "1 - Criar compromisso\n"
+                "2 - Compromissos de hoje\n"
+                "3 - Compromissos da semana\n"
+                "4 - Cancelar um compromisso\n\n"
+                "Responda com o número."
+            )
+
         opcoes = {"6": "entrada", "2": "venda"}
         if texto.strip() in opcoes:
             tipo = opcoes[texto.strip()]
@@ -949,17 +1170,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("Você ainda não tem nenhum produto cadastrado. "
-                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu(modulos)
             dados = {"tipo": tipo, "produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, f"{tipo}_produto", dados)
             rodape = "Responda com o número. Pra mais de um produto, separe por vírgula (ex: 1,3,5)."
             return montar_lista_numerada(produtos, "Qual produto?", rodape=rodape)
 
         if texto.strip() == "5":
-            return await gerar_resumo_dia(conn, cliente["id"])
+            return await gerar_resumo_dia(conn, cliente["id"], modulos)
 
         if texto.strip() == "7":
-            return gerar_visao_geral(conn, cliente["id"])
+            return gerar_visao_geral(conn, cliente["id"], modulos)
 
         if texto.strip() == "3":
             salvar_sessao(conn, numero_autorizado_id, "prod_nome", {})
@@ -974,7 +1195,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("Você ainda não tem nenhum produto cadastrado. "
-                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu(modulos)
             dados = {"produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, "receita_produto_escolha", dados)
             return montar_lista_numerada(produtos, "De qual produto você quer montar/editar a receita?")
@@ -991,14 +1212,14 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             )
 
         if texto.strip() == "11" or texto_low in ("ajuda", "help"):
-            return TEXTO_AJUDA + "\n\n" + resposta_menu()
+            return TEXTO_AJUDA + "\n\n" + resposta_menu(modulos)
 
         if texto.strip() == "1":
             produtos = listar_produtos_cliente(conn, cliente["id"])
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("Você ainda não tem nenhum produto cadastrado. "
-                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu(modulos)
             dados = {"produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, "orc_escolha_produtos", dados)
             rodape = "Responda com o(s) número(s) dos produtos do orçamento. Pra mais de um, separe por vírgula (ex: 1,3,5)."
@@ -1006,13 +1227,13 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
         # modo IA: UMA ÚNICA chamada à Groq classifica a intenção e já devolve
         # os campos relevantes pra ela — sem chamadas adicionais depois (TAREFA 2).
-        if cliente["plano"] == "ia":
+        if cliente["plano"] == "ia" and "estoque" in modulos:
             extraido = await chamar_groq_json(texto, get_groq_key(cliente))
             intencao = extraido.get("intencao") if extraido else None
 
             if intencao in ("entrada", "venda", "saida"):
                 extraido["tipo"] = intencao  # compatibilidade com preparar_confirmacao_ia
-                return await preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto)
+                return await preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto, modulos)
 
             if intencao == "cadastro_produto":
                 resposta_ia = await iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extraido)
@@ -1020,16 +1241,16 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                     return resposta_ia
 
             elif intencao == "edicao_produto":
-                resposta_ia = await iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraido)
+                resposta_ia = await iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraido, modulos)
                 if resposta_ia:
                     return resposta_ia
 
             elif intencao == "custos_fixos":
-                resposta_ia = iniciar_calculadora_custos_fixos_ia(extraido)
+                resposta_ia = iniciar_calculadora_custos_fixos_ia(extraido, modulos)
                 if resposta_ia:
                     return resposta_ia
 
-        return "Olá, bem-vindo(a) ao Painel do Seu Negócio!\n\n" + resposta_menu()
+        return "Olá, bem-vindo(a) ao Painel do Seu Negócio!\n\n" + resposta_menu(modulos)
 
     # ── ETAPA: submenu da opção 10 — estoque (quantidade) ou dados do produto — TAREFA 1 ──
     if etapa == "editar_menu":
@@ -1038,7 +1259,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("Você ainda não tem nenhum produto cadastrado. "
-                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu(modulos)
             # Exatamente o mesmo fluxo de ajuste de estoque de sempre (múltiplos produtos, fila).
             dados = {"tipo": "ajuste", "produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, "ajuste_produto", dados)
@@ -1050,7 +1271,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if not produtos:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("Você ainda não tem nenhum produto cadastrado. "
-                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu(modulos)
             dados = {"produtos_ids": [p["id"] for p in produtos]}
             salvar_sessao(conn, numero_autorizado_id, "editar_campo_produto_escolha", dados)
             return montar_lista_numerada(produtos, "Qual produto você quer editar (nome/custo/preço/SKU)?")
@@ -1069,7 +1290,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                           (produtos_ids[idx - 1], cliente["id"]))
         if not produto:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Esse produto não existe mais.\n\n" + resposta_menu()
+            return "Esse produto não existe mais.\n\n" + resposta_menu(modulos)
         dados = {
             "editar_produto_id": produto["id"],
             "editar_produto_nome": produto["nome"],
@@ -1125,11 +1346,145 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             aplicar_edicao_produto(conn, cliente["id"], dados["editar_produto_id"], dados.get("editar_campos_novos", {}))
             nome_final = dados.get("editar_campos_novos", {}).get("nome", dados.get("editar_produto_nome"))
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return f"✅ *{nome_final}* atualizado com sucesso!\n\n" + resposta_menu()
+            return f"✅ *{nome_final}* atualizado com sucesso!\n\n" + resposta_menu(modulos)
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cancelado.\n\n" + resposta_menu()
+            return "Cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
+
+    # ── ETAPA: agenda — submenu (criar / listar hoje / listar semana / cancelar) ──
+    if etapa == "agenda_menu":
+        if texto.strip() == "1":
+            salvar_sessao(conn, numero_autorizado_id, "agenda_criar_titulo", {})
+            return "Qual o título do compromisso? (ex: Consulta, Reunião, Dentista)"
+
+        if texto.strip() == "2":
+            salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+            return texto_lista_compromissos_periodo(conn, cliente["id"], dias=0) + "\n\n" + AGENDA_MENU_TEXTO
+
+        if texto.strip() == "3":
+            salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+            return texto_lista_compromissos_periodo(conn, cliente["id"], dias=7) + "\n\n" + AGENDA_MENU_TEXTO
+
+        if texto.strip() == "4":
+            compromissos = listar_compromissos_futuros_cliente(conn, cliente["id"])
+            if not compromissos:
+                salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+                return "Você não tem compromissos futuros agendados.\n\n" + AGENDA_MENU_TEXTO
+            dados = {"agenda_cancelar_ids": [c["id"] for c in compromissos]}
+            salvar_sessao(conn, numero_autorizado_id, "agenda_cancelar_escolha", dados)
+            itens = [
+                {"nome": f"{c['titulo']} — {c['data'].strftime('%d/%m')} às {str(c['hora_inicio'])[:5]}"}
+                for c in compromissos
+            ]
+            return montar_lista_numerada(itens, "Qual compromisso cancelar?")
+
+        return "Responda 1 (criar), 2 (hoje), 3 (semana) ou 4 (cancelar)."
+
+    # ── ETAPA: agenda — criar compromisso: título ──
+    if etapa == "agenda_criar_titulo":
+        titulo = texto.strip()
+        if not titulo:
+            return "Manda um título válido, por favor."
+        dados["agenda_titulo"] = titulo
+        clientes = listar_clientes_negocio_cliente(conn, cliente["id"])
+        if clientes:
+            dados["agenda_clientes_opcoes"] = [{"id": c["id"], "nome": c["nome"]} for c in clientes]
+            salvar_sessao(conn, numero_autorizado_id, "agenda_criar_cliente", dados)
+            return montar_lista_numerada(
+                clientes, "Vincular a algum cliente? (opcional)",
+                rodape="Responda o número, ou digite PULAR."
+            )
+        salvar_sessao(conn, numero_autorizado_id, "agenda_criar_data", dados)
+        return "Qual a data? (formato DD/MM ou DD/MM/AAAA)"
+
+    # ── ETAPA: agenda — criar compromisso: cliente vinculado (opcional) ──
+    if etapa == "agenda_criar_cliente":
+        if texto_low in ("pular", "não", "nao", "n"):
+            dados["agenda_cliente_negocio_id"] = None
+            dados.pop("agenda_clientes_opcoes", None)
+            salvar_sessao(conn, numero_autorizado_id, "agenda_criar_data", dados)
+            return "Qual a data? (formato DD/MM ou DD/MM/AAAA)"
+        opcoes_cliente = dados.get("agenda_clientes_opcoes", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(opcoes_cliente)
+        except (ValueError, AssertionError):
+            return f"Manda o número do cliente (1 a {len(opcoes_cliente)}), ou digite PULAR."
+        escolhido = opcoes_cliente[idx - 1]
+        dados["agenda_cliente_negocio_id"] = escolhido["id"]
+        dados["agenda_cliente_negocio_nome"] = escolhido["nome"]
+        dados.pop("agenda_clientes_opcoes", None)
+        salvar_sessao(conn, numero_autorizado_id, "agenda_criar_data", dados)
+        return "Qual a data? (formato DD/MM ou DD/MM/AAAA)"
+
+    # ── ETAPA: agenda — criar compromisso: data ──
+    if etapa == "agenda_criar_data":
+        data_obj = parse_data_br(texto)
+        if not data_obj:
+            return "Data inválida. Manda no formato DD/MM ou DD/MM/AAAA."
+        dados["agenda_data"] = data_obj.isoformat()
+        salvar_sessao(conn, numero_autorizado_id, "agenda_criar_hora", dados)
+        return "Que horas? (formato HH:MM)"
+
+    # ── ETAPA: agenda — criar compromisso: hora ──
+    if etapa == "agenda_criar_hora":
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", texto.strip())
+        if not m:
+            return "Hora inválida. Manda no formato HH:MM (ex: 14:30)."
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 23 or mi > 59:
+            return "Hora inválida. Manda no formato HH:MM (ex: 14:30)."
+        dados["agenda_hora"] = f"{h:02d}:{mi:02d}"
+        salvar_sessao(conn, numero_autorizado_id, "agenda_criar_lembrete", dados)
+        return "Quer receber um lembrete antes por WhatsApp? Responda quantos minutos antes (ex: 30), ou NÃO."
+
+    # ── ETAPA: agenda — criar compromisso: lembrete ──
+    if etapa == "agenda_criar_lembrete":
+        if texto_low in ("não", "nao", "n"):
+            dados["agenda_lembrete_minutos"] = None
+        else:
+            try:
+                minutos = int(texto.strip())
+                assert minutos > 0
+            except (ValueError, AssertionError):
+                return "Manda só o número de minutos antes (ex: 30), ou responda NÃO."
+            dados["agenda_lembrete_minutos"] = minutos
+        salvar_sessao(conn, numero_autorizado_id, "agenda_criar_confirmar", dados)
+        return montar_resumo_agenda_confirmacao(conn, cliente["id"], dados)
+
+    # ── ETAPA: agenda — criar compromisso: confirmação final e gravação ──
+    if etapa == "agenda_criar_confirmar":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            data_obj = datetime.fromisoformat(dados["agenda_data"]).date()
+            hora_inicio = dados["agenda_hora"]
+            hora_fim = calcular_hora_fim(hora_inicio)
+            db_exec(conn, """
+                INSERT INTO agenda_compromissos
+                    (cliente_id, cliente_negocio_id, titulo, data, hora_inicio, hora_fim, lembrete_minutos_antes)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """, (cliente["id"], dados.get("agenda_cliente_negocio_id"), dados["agenda_titulo"],
+                  data_obj, hora_inicio, hora_fim, dados.get("agenda_lembrete_minutos")))
+            salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+            return "✅ Compromisso agendado com sucesso!\n\n" + AGENDA_MENU_TEXTO
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+            return "Cancelado.\n\n" + AGENDA_MENU_TEXTO
+        return "Responda SIM ou NÃO."
+
+    # ── ETAPA: agenda — cancelar um compromisso existente ──
+    if etapa == "agenda_cancelar_escolha":
+        ids = dados.get("agenda_cancelar_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(ids)
+        except (ValueError, AssertionError):
+            return f"Manda o número do compromisso (1 a {len(ids)})."
+        compromisso_id = ids[idx - 1]
+        db_exec(conn, "UPDATE agenda_compromissos SET status = 'cancelado' WHERE id = %s AND cliente_id = %s",
+                (compromisso_id, cliente["id"]))
+        salvar_sessao(conn, numero_autorizado_id, "agenda_menu", {})
+        return "✅ Compromisso cancelado.\n\n" + AGENDA_MENU_TEXTO
 
     # ── ETAPA: calculadora de custos fixos — coletando conta por conta até PRONTO — TAREFA 3 ──
     if etapa == "custosfixos_item":
@@ -1137,10 +1492,10 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             itens = dados.get("custosfixos_itens", [])
             if not itens:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
-                return "Nenhuma conta adicionada. Calculadora cancelada.\n\n" + resposta_menu()
+                return "Nenhuma conta adicionada. Calculadora cancelada.\n\n" + resposta_menu(modulos)
             total = sum(item["valor"] for item in itens)  # soma sempre em Python
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return montar_texto_resultado_custos_fixos(itens, total) + "\n\n" + resposta_menu()
+            return montar_texto_resultado_custos_fixos(itens, total) + "\n\n" + resposta_menu(modulos)
 
         resultado = parse_conta_fixa_texto(texto)
         if not resultado:
@@ -1179,7 +1534,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                     f"Custo: R$ {produto['custo_unitario']:.2f}\n"
                     f"Preço de venda: R$ {produto['preco_venda']:.2f}"
                 )
-            return "\n\n".join(blocos) + "\n\n" + resposta_menu()
+            return "\n\n".join(blocos) + "\n\n" + resposta_menu(modulos)
 
         # entrada / venda / ajuste: monta a fila e processa item por item
         primeiro = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (escolhidos_ids[0],))
@@ -1306,16 +1661,16 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             existente = buscar_materia_prima_por_nome(conn, cliente["id"], dados["mp_nome"])
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             if existente:
-                return f"⚠️ Já existe uma matéria-prima chamada '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu()
+                return f"⚠️ Já existe uma matéria-prima chamada '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu(modulos)
             db_exec(conn, """
                 INSERT INTO materias_primas (cliente_id, nome, unidade, custo_unitario, estoque_atual, estoque_minimo)
                 VALUES (%s,%s,%s,%s,%s,%s)
             """, (cliente["id"], dados["mp_nome"], dados["mp_unidade"], dados["mp_custo"], dados["mp_estoque"],
                   dados.get("mp_estoque_minimo")))
-            return "✅ Matéria-prima cadastrada com sucesso!\n\n" + resposta_menu()
+            return "✅ Matéria-prima cadastrada com sucesso!\n\n" + resposta_menu(modulos)
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cancelado.\n\n" + resposta_menu()
+            return "Cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
 
     # ── ETAPA: cadastro de produto (opção 8) ──
@@ -1482,7 +1837,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             return "Qual o estoque inicial desse produto?"
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cadastro cancelado.\n\n" + resposta_menu()
+            return "Cadastro cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
 
     if etapa == "prod_custo":
@@ -1546,7 +1901,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             existente = buscar_produto_por_nome(conn, cliente["id"], dados["prod_nome"])
             if existente:
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
-                return f"⚠️ Já existe um produto chamado '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu()
+                return f"⚠️ Já existe um produto chamado '{existente['nome']}'. Use o painel pra editar.\n\n" + resposta_menu(modulos)
             produto_novo = db_exec(conn, """
                 INSERT INTO produtos (cliente_id, nome, unidade, custo_unitario, preco_venda, estoque_atual)
                 VALUES (%s,%s,%s,%s,%s,%s) RETURNING *
@@ -1555,7 +1910,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
             if not dados.get("prod_quer_receita"):
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
-                return "✅ Produto cadastrado com sucesso!\n\n" + resposta_menu()
+                return "✅ Produto cadastrado com sucesso!\n\n" + resposta_menu(modulos)
 
             # TAREFA 1 — a receita já foi montada durante a calculadora: salva direto, sem perguntar de novo.
             if dados.get("calc_receita_pronta") and dados.get("receita_itens"):
@@ -1567,7 +1922,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("✅ Produto cadastrado com receita e preço já calculados!\n\n"
                         "A partir de agora, vender esse produto já desconta a matéria-prima automaticamente.\n\n"
-                        ) + resposta_menu()
+                        ) + resposta_menu(modulos)
 
             # Quis vincular receita — encadeia direto no mesmo fluxo da opção 7,
             # já com o produto recém-criado.
@@ -1576,7 +1931,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return ("✅ Produto cadastrado com sucesso!\n\n"
                         "Só que você ainda não tem matéria-prima cadastrada. Cadastre uma (opção 6) "
-                        "e depois monte a receita pela opção 7.\n\n") + resposta_menu()
+                        "e depois monte a receita pela opção 7.\n\n") + resposta_menu(modulos)
 
             dados_receita = {
                 "receita_produto_id": produto_novo["id"], "receita_produto_nome": produto_novo["nome"],
@@ -1589,7 +1944,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             )
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cancelado.\n\n" + resposta_menu()
+            return "Cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
 
     # ── ETAPA: montar receita de um produto / Adicionar Produto (opção 9) ──
@@ -1603,12 +1958,12 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (produtos_ids[idx - 1],))
         if not produto:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Esse produto não existe mais.\n\n" + resposta_menu()
+            return "Esse produto não existe mais.\n\n" + resposta_menu(modulos)
 
         materias = listar_materias_primas_cliente(conn, cliente["id"])
         if not materias:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Você ainda não tem matéria-prima cadastrada. Cadastre uma primeiro (opção 6).\n\n" + resposta_menu()
+            return "Você ainda não tem matéria-prima cadastrada. Cadastre uma primeiro (opção 6).\n\n" + resposta_menu(modulos)
 
         dados = {
             "receita_produto_id": produto["id"], "receita_produto_nome": produto["nome"],
@@ -1624,7 +1979,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         if texto_low == "pronto":
             if not dados.get("receita_itens"):
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
-                return "Nenhum item adicionado. Receita cancelada.\n\n" + resposta_menu()
+                return "Nenhum item adicionado. Receita cancelada.\n\n" + resposta_menu(modulos)
             salvar_sessao(conn, numero_autorizado_id, "confirmando_receita", dados)
             linhas = "\n".join(f"- {fmt_num(i['quantidade'])} {i['unidade']} de {i['nome']}" for i in dados["receita_itens"])
             return f"Confirma a receita de *{dados['receita_produto_nome']}*?\n{linhas}\n\nResponda SIM ou NÃO."
@@ -1671,10 +2026,10 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                     VALUES (%s,%s,%s)
                 """, (produto_id, item["materia_prima_id"], item["quantidade"]))
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "✅ Receita salva com sucesso! A partir de agora, vender esse produto já desconta a matéria-prima automaticamente.\n\n" + resposta_menu()
+            return "✅ Receita salva com sucesso! A partir de agora, vender esse produto já desconta a matéria-prima automaticamente.\n\n" + resposta_menu(modulos)
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cancelado.\n\n" + resposta_menu()
+            return "Cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
 
     # ── ETAPA: confirmando ──
@@ -1705,10 +2060,10 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             resposta = "✅ Registrado com sucesso!"
             if todos_alertas:
                 resposta += "\n\n" + "\n".join(todos_alertas)
-            return resposta + "\n\n" + resposta_menu()
+            return resposta + "\n\n" + resposta_menu(modulos)
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cancelado.\n\n" + resposta_menu()
+            return "Cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
 
     # ── ETAPA: configurando horário(s) do resumo automático (opção 8) ──
@@ -1716,7 +2071,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         if texto_low in ("desativar", "desligar", "remover", "cancelar_config"):
             salvar_config_resumo_automatico(conn, cliente["id"], None, None, ativo=False)
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "🔕 Resumo automático desativado.\n\n" + resposta_menu()
+            return "🔕 Resumo automático desativado.\n\n" + resposta_menu(modulos)
 
         horarios = parse_horarios(texto)
         if horarios is None:
@@ -1732,7 +2087,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         resumo_horarios = " e ".join(horarios)
         return (
             f"✅ Resumo automático configurado para {resumo_horarios} (todos os números autorizados recebem).\n\n"
-            + resposta_menu()
+            + resposta_menu(modulos)
         )
 
     # ── ETAPA: orçamento (opção 1) — escolhendo o(s) produto(s) ──
@@ -1785,7 +2140,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             _, subtotal_atual = calcular_itens_orcamento(conn, cliente["id"], dados.get("orc_itens", []))
         except ValueError as e:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return f"❌ {e}\n\n" + resposta_menu()
+            return f"❌ {e}\n\n" + resposta_menu(modulos)
         resultado_ajuste = parse_ajuste_preco_texto(texto, subtotal_atual)
         if resultado_ajuste is None:
             return (
@@ -1810,7 +2165,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             itens_detalhados, subtotal = calcular_itens_orcamento(conn, cliente["id"], dados.get("orc_itens", []))
         except ValueError as e:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return f"❌ {e}\n\n" + resposta_menu()
+            return f"❌ {e}\n\n" + resposta_menu(modulos)
         ajuste_tipo = dados.get("orc_desconto_tipo")
         ajuste_valor_informado = dados.get("orc_desconto_valor_informado", 0.0) or 0.0
         ajuste_calculado = calcular_ajuste_preco(subtotal, ajuste_tipo, ajuste_valor_informado)
@@ -1832,16 +2187,16 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     # fallback de segurança
     salvar_sessao(conn, numero_autorizado_id, "menu", {})
-    return resposta_menu()
+    return resposta_menu(modulos)
 
-async def preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto_original):
+async def preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto_original, modulos=None):
     tipo = extraido.get("tipo")
     nome_produto = extraido.get("produto")
     quantidade = extraido.get("quantidade")
     valor_unitario = extraido.get("valor_unitario") or 0
 
     if not nome_produto or quantidade is None:
-        return "Entendi que é sobre estoque, mas faltou produto ou quantidade. Pode reescrever?\n\n" + resposta_menu()
+        return "Entendi que é sobre estoque, mas faltou produto ou quantidade. Pode reescrever?\n\n" + resposta_menu(modulos)
 
     produto = buscar_produto_por_nome(conn, cliente["id"], nome_produto)
     if not produto:
@@ -1927,7 +2282,7 @@ async def iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extra
         "Qual o estoque inicial desse produto?"
     )
 
-async def iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraido) -> Optional[str]:
+async def iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraido, modulos=None) -> Optional[str]:
     """TAREFA 1 — modo IA: reconhece um pedido de edição de produto numa mensagem
     livre (ex: 'muda o preço do bolo pra 30 e o nome pra Bolo Premium') e monta
     o mesmo resumo de confirmação usado no fluxo do formulário (etapa
@@ -1941,7 +2296,7 @@ async def iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraid
     produto = buscar_produto_por_nome(conn, cliente["id"], nome_produto)
     if not produto:
         return (f"Não encontrei nenhum produto chamado '{nome_produto}'. "
-                 "Confira o nome ou use a opção 10 do menu.\n\n") + resposta_menu()
+                 "Confira o nome ou use a opção 10 do menu.\n\n") + resposta_menu(modulos)
 
     campos_novos = {}
     if extraido.get("nome_novo"):
@@ -1976,7 +2331,7 @@ async def iniciar_edicao_produto_ia(conn, cliente, numero_autorizado_id, extraid
     salvar_sessao(conn, numero_autorizado_id, "editar_campo_confirmar", dados)
     return montar_resumo_edicao_produto(dados)
 
-def iniciar_calculadora_custos_fixos_ia(extraido) -> Optional[str]:
+def iniciar_calculadora_custos_fixos_ia(extraido, modulos=None) -> Optional[str]:
     """TAREFA 3 — modo IA: reconhece uma lista de contas fixas numa mensagem livre
     (ex: 'aluguel 2000, luz 300, água 100') e soma tudo em Python — nunca confia
     na soma que a IA possa ter feito. Não usa/altera sessão: é resposta única.
@@ -1997,9 +2352,9 @@ def iniciar_calculadora_custos_fixos_ia(extraido) -> Optional[str]:
     if not itens:
         return None
     total = sum(item["valor"] for item in itens)  # soma sempre em Python, nunca confia na IA
-    return montar_texto_resultado_custos_fixos(itens, total) + "\n\n" + resposta_menu()
+    return montar_texto_resultado_custos_fixos(itens, total) + "\n\n" + resposta_menu(modulos)
 
-def gerar_visao_geral(conn, cliente_id: int) -> str:
+def gerar_visao_geral(conn, cliente_id: int, modulos=None) -> str:
     """Lista todos os produtos e matérias-primas com o estoque atual,
     sinalizando com ⚠️ quem tem estoque mínimo definido e já ficou abaixo dele."""
     produtos = db_all(conn, """
@@ -2029,9 +2384,9 @@ def gerar_visao_geral(conn, cliente_id: int) -> str:
     else:
         blocos.append("Nenhuma matéria-prima cadastrada ainda.")
 
-    return "\n".join(blocos) + "\n\n" + resposta_menu()
+    return "\n".join(blocos) + "\n\n" + resposta_menu(modulos)
 
-async def gerar_resumo_dia(conn, cliente_id: int) -> str:
+async def gerar_resumo_dia(conn, cliente_id: int, modulos=None) -> str:
     hoje = datetime.utcnow().date()
     linhas = db_all(conn, """
         SELECT tipo, COALESCE(SUM(quantidade),0) qtd, COALESCE(SUM(valor_total),0) total
@@ -2040,11 +2395,11 @@ async def gerar_resumo_dia(conn, cliente_id: int) -> str:
         GROUP BY tipo
     """, (cliente_id, hoje))
     if not linhas:
-        return f"📊 Nenhuma movimentação hoje ({hoje.strftime('%d/%m')}).\n\n" + resposta_menu()
+        return f"📊 Nenhuma movimentação hoje ({hoje.strftime('%d/%m')}).\n\n" + resposta_menu(modulos)
     txt = f"📊 *Resumo de hoje ({hoje.strftime('%d/%m')})*\n"
     for l in linhas:
         txt += f"- {l['tipo'].capitalize()}: {fmt_num(l['qtd'])} un | R$ {float(l['total']):.2f}\n"
-    return txt + "\n" + resposta_menu()
+    return txt + "\n" + resposta_menu(modulos)
 
 # ─────────────────────────────────────────
 #  RESUMO AUTOMÁTICO — configuração e disparo agendado
@@ -2131,6 +2486,59 @@ async def loop_relogio_resumo_automatico():
             await checar_e_disparar_resumos_automaticos()
         except Exception as e:
             print(f"⚠️ Erro no relógio de resumo automático: {e}")
+        await asyncio.sleep(60)
+
+# ─────────────────────────────────────────
+#  AGENDA — lembrete automático por WhatsApp
+# ─────────────────────────────────────────
+async def checar_e_disparar_lembretes_agenda():
+    """Roda 1x por minuto. Olha os compromissos de hoje com lembrete configurado
+    e ainda não enviado (lembrete_enviado = FALSE), calcula se já está na janela
+    de disparo (hora do compromisso menos os minutos de antecedência) e dispara
+    o WhatsApp, marcando lembrete_enviado = TRUE pra não reenviar."""
+    agora = datetime.now(TIMEZONE_PADRAO)
+    hoje = agora.date()
+    agora_min = agora.hour * 60 + agora.minute
+
+    conn = get_conn_raw()
+    try:
+        compromissos = db_all(conn, """
+            SELECT a.id, a.cliente_id, a.titulo, a.hora_inicio, a.notas, a.lembrete_minutos_antes
+            FROM agenda_compromissos a
+            WHERE a.data = %s AND a.status = 'agendado'
+              AND a.lembrete_minutos_antes IS NOT NULL AND a.lembrete_enviado = FALSE
+        """, (hoje,))
+        for c in compromissos:
+            h, mi = map(int, str(c["hora_inicio"])[:5].split(":"))
+            compromisso_min = h * 60 + mi
+            disparo_min = compromisso_min - int(c["lembrete_minutos_antes"])
+            if agora_min < disparo_min:
+                continue  # ainda não chegou a hora do lembrete
+            if agora_min > disparo_min + 60:
+                # passou muito da janela (ex: sistema ficou fora do ar) — marca como
+                # enviado sem disparar, pra não mandar um lembrete extemporâneo horas depois
+                db_exec(conn, "UPDATE agenda_compromissos SET lembrete_enviado = TRUE WHERE id = %s", (c["id"],))
+                continue
+            try:
+                numeros = db_all(conn, "SELECT numero FROM numeros_autorizados WHERE cliente_id = %s AND ativo = TRUE",
+                                  (c["cliente_id"],))
+                texto = f"⏰ *Lembrete de compromisso*\n\n📌 {c['titulo']}\n🕐 Hoje às {str(c['hora_inicio'])[:5]}"
+                if c.get("notas"):
+                    texto += f"\n📝 {c['notas']}"
+                for n in numeros:
+                    await enviar_whatsapp(n["numero"], texto)
+                db_exec(conn, "UPDATE agenda_compromissos SET lembrete_enviado = TRUE WHERE id = %s", (c["id"],))
+            except Exception as e:
+                print(f"⚠️ Erro ao disparar lembrete da agenda (compromisso {c['id']}): {e}")
+    finally:
+        conn.close()
+
+async def loop_relogio_lembretes_agenda():
+    while True:
+        try:
+            await checar_e_disparar_lembretes_agenda()
+        except Exception as e:
+            print(f"⚠️ Erro no relógio de lembretes da agenda: {e}")
         await asyncio.sleep(60)
 
 # ─────────────────────────────────────────
@@ -2263,6 +2671,62 @@ def criar_tabela_custos_fixos():
     finally:
         conn.close()
 
+def criar_tabela_agenda_compromissos():
+    """Cria a tabela agenda_compromissos (agenda genérica de compromissos, não
+    confundir com `agendamentos`, que é reposição de estoque) no startup SE
+    ainda não existir. Mesmo padrão 'self-healing' das outras tabelas novas."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS agenda_compromissos (
+                id                      SERIAL PRIMARY KEY,
+                cliente_id              INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                cliente_negocio_id      INTEGER NULL REFERENCES clientes_negocio(id) ON DELETE SET NULL,
+                titulo                  TEXT NOT NULL,
+                data                    DATE NOT NULL,
+                hora_inicio             TIME NOT NULL,
+                hora_fim                TIME NULL,
+                status                  TEXT NOT NULL DEFAULT 'agendado',
+                notas                   TEXT,
+                lembrete_minutos_antes  INTEGER NULL,
+                lembrete_enviado        BOOLEAN NOT NULL DEFAULT FALSE,
+                criado_em               TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS ix_agenda_compromissos_cliente_data
+            ON agenda_compromissos (cliente_id, data);
+        """)
+        conn.commit()
+        print("✅ Tabela agenda_compromissos: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela agenda_compromissos: {e}")
+    finally:
+        conn.close()
+
+def criar_coluna_modulos_clientes():
+    """Adiciona a coluna `modulos` (array de texto) na tabela clientes, SE ainda
+    não existir. Guarda quais módulos (estoque/agenda) aquele cliente tem ativo.
+    Nullable com default ['estoque'] pra não quebrar clientes que já existem hoje.
+    Mesmo padrão 'self-healing' das outras migrações — ALTER TABLE ADD COLUMN IF NOT EXISTS."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            ALTER TABLE clientes
+            ADD COLUMN IF NOT EXISTS modulos TEXT[] DEFAULT ARRAY['estoque'];
+        """)
+        cur.execute("""
+            UPDATE clientes SET modulos = ARRAY['estoque'] WHERE modulos IS NULL;
+        """)
+        conn.commit()
+        print("✅ Coluna clientes.modulos: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar coluna clientes.modulos: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -2274,6 +2738,8 @@ async def lifespan(app: FastAPI):
     criar_tabelas_orcamentos()
     criar_tabela_clientes_negocio()
     criar_tabela_custos_fixos()
+    criar_tabela_agenda_compromissos()
+    criar_coluna_modulos_clientes()
     
     # 2️⃣ Testar conexão com banco
     try:
@@ -2283,16 +2749,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ Não foi possível conectar ao banco no startup: {e}")
 
-    # 3️⃣ Iniciar o "relógio" de resumo automático
+    # 3️⃣ Iniciar os "relógios" em background
     tarefa_relogio = asyncio.create_task(loop_relogio_resumo_automatico())
+    tarefa_relogio_agenda = asyncio.create_task(loop_relogio_lembretes_agenda())
     yield
     
-    # 4️⃣ Cleanup: cancelar o relógio quando o app fecha
+    # 4️⃣ Cleanup: cancelar os relógios quando o app fecha
     tarefa_relogio.cancel()
-    try:
-        await tarefa_relogio
-    except asyncio.CancelledError:
-        pass
+    tarefa_relogio_agenda.cancel()
+    for tarefa in (tarefa_relogio, tarefa_relogio_agenda):
+        try:
+            await tarefa
+        except asyncio.CancelledError:
+            pass
 
 app = FastAPI(title="Estoque WPP", lifespan=lifespan)
 app.add_middleware(
@@ -2324,7 +2793,7 @@ def me(cliente=Depends(get_current_cliente)):
 # ═════════════════════════════════════════
 @app.get("/admin/clientes")
 def admin_listar_clientes(conn=Depends(get_db), _admin=Depends(check_admin)):
-    clientes = db_all(conn, "SELECT id, nome_negocio, email, plano, ativo, criado_em FROM clientes ORDER BY id DESC")
+    clientes = db_all(conn, "SELECT id, nome_negocio, email, plano, ativo, modulos, criado_em FROM clientes ORDER BY id DESC")
     for c in clientes:
         c["numeros"] = db_all(conn, "SELECT * FROM numeros_autorizados WHERE cliente_id = %s", (c["id"],))
     return clientes
@@ -2334,15 +2803,24 @@ def admin_criar_cliente(body: AdminCriarClienteBody, conn=Depends(get_db), _admi
     if db_one(conn, "SELECT id FROM clientes WHERE email = %s", (body.email,)):
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     senha_hash = bcrypt.hashpw(body.senha.encode(), bcrypt.gensalt()).decode()
+    modulos = body.modulos if body.modulos else ["estoque"]
     cliente = db_exec(conn, """
-        INSERT INTO clientes (nome_negocio, email, senha_hash, plano)
-        VALUES (%s,%s,%s,%s) RETURNING id, nome_negocio, email, plano, ativo
-    """, (body.nome_negocio, body.email, senha_hash, body.plano))
+        INSERT INTO clientes (nome_negocio, email, senha_hash, plano, modulos)
+        VALUES (%s,%s,%s,%s,%s) RETURNING id, nome_negocio, email, plano, ativo, modulos
+    """, (body.nome_negocio, body.email, senha_hash, body.plano, modulos))
     return cliente
 
 @app.patch("/admin/clientes/{cliente_id}/plano")
 def admin_trocar_plano(cliente_id: int, body: AdminPlanoBody, conn=Depends(get_db), _admin=Depends(check_admin)):
     db_exec(conn, "UPDATE clientes SET plano = %s WHERE id = %s", (body.plano, cliente_id))
+    return {"ok": True}
+
+@app.patch("/admin/clientes/{cliente_id}/modulos")
+def admin_trocar_modulos(cliente_id: int, body: AdminModulosBody, conn=Depends(get_db), _admin=Depends(check_admin)):
+    modulos_validos = [m for m in body.modulos if m in ("estoque", "agenda")]
+    if not modulos_validos:
+        raise HTTPException(status_code=400, detail="Informe ao menos um módulo válido (estoque, agenda)")
+    db_exec(conn, "UPDATE clientes SET modulos = %s WHERE id = %s", (modulos_validos, cliente_id))
     return {"ok": True}
 
 @app.patch("/admin/clientes/{cliente_id}/ativo")
@@ -3125,6 +3603,131 @@ def deletar_agendamento(agendamento_id: int, cliente=Depends(get_current_cliente
     if not agendamento:
         raise HTTPException(status_code=404, detail="Agendamento não encontrado")
     db_exec(conn, "DELETE FROM agendamentos WHERE id = %s", (agendamento_id,))
+    return {"ok": True}
+
+# ═════════════════════════════════════════
+#  AGENDA / COMPROMISSOS
+#  (⚠️ Não confundir com /agendamentos acima, que é reposição de estoque —
+#  esta aqui é a agenda genérica de compromissos, tabela agenda_compromissos)
+# ═════════════════════════════════════════
+@app.post("/agenda")
+def criar_compromisso_agenda(body: AgendaCompromissoBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Cria um novo compromisso. Pode ou não estar vinculado a um cliente_negocio.
+    Conflito de horário só gera aviso (aviso_conflito na resposta) — não bloqueia."""
+    try:
+        data_obj = datetime.fromisoformat(body.data).date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data inválida (use YYYY-MM-DD)")
+    if not re.fullmatch(r"\d{1,2}:\d{2}", body.hora_inicio):
+        raise HTTPException(status_code=400, detail="Hora inválida (use HH:MM)")
+    hora_fim = calcular_hora_fim(body.hora_inicio, body.hora_fim, body.duracao_minutos)
+
+    cliente_negocio_id = None
+    if body.cliente_negocio_id:
+        cn = db_one(conn, "SELECT id FROM clientes_negocio WHERE id = %s AND cliente_id = %s",
+                    (body.cliente_negocio_id, cliente["id"]))
+        if not cn:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        cliente_negocio_id = cn["id"]
+
+    conflitos = verificar_conflito_agenda(conn, cliente["id"], data_obj, body.hora_inicio, hora_fim)
+
+    registro = db_exec(conn, """
+        INSERT INTO agenda_compromissos
+            (cliente_id, cliente_negocio_id, titulo, data, hora_inicio, hora_fim, notas, lembrete_minutos_antes)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *
+    """, (cliente["id"], cliente_negocio_id, body.titulo, data_obj, body.hora_inicio, hora_fim,
+          body.notas, body.lembrete_minutos_antes))
+
+    resultado = dict(registro)
+    if conflitos:
+        resultado["aviso_conflito"] = [f"{c['titulo']} ({str(c['hora_inicio'])[:5]})" for c in conflitos]
+    return resultado
+
+@app.get("/agenda")
+def listar_agenda(inicio: str, fim: str, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Lista compromissos (não cancelados ou não) entre duas datas — usado pelo
+    calendário do painel (dia/semana/mês manda o intervalo visível)."""
+    try:
+        data_inicio = datetime.fromisoformat(inicio).date()
+        data_fim = datetime.fromisoformat(fim).date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Datas inválidas (use YYYY-MM-DD)")
+    return db_all(conn, """
+        SELECT a.*, cn.nome AS cliente_negocio_nome
+        FROM agenda_compromissos a
+        LEFT JOIN clientes_negocio cn ON cn.id = a.cliente_negocio_id
+        WHERE a.cliente_id = %s AND a.data BETWEEN %s AND %s
+        ORDER BY a.data, a.hora_inicio
+    """, (cliente["id"], data_inicio, data_fim))
+
+@app.put("/agenda/{compromisso_id}")
+def editar_compromisso_agenda(compromisso_id: int, body: AgendaCompromissoBody,
+                               cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    existente = db_one(conn, "SELECT * FROM agenda_compromissos WHERE id = %s AND cliente_id = %s",
+                        (compromisso_id, cliente["id"]))
+    if not existente:
+        raise HTTPException(status_code=404, detail="Compromisso não encontrado")
+    try:
+        data_obj = datetime.fromisoformat(body.data).date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data inválida (use YYYY-MM-DD)")
+    if not re.fullmatch(r"\d{1,2}:\d{2}", body.hora_inicio):
+        raise HTTPException(status_code=400, detail="Hora inválida (use HH:MM)")
+    hora_fim = calcular_hora_fim(body.hora_inicio, body.hora_fim, body.duracao_minutos)
+
+    cliente_negocio_id = None
+    if body.cliente_negocio_id:
+        cn = db_one(conn, "SELECT id FROM clientes_negocio WHERE id = %s AND cliente_id = %s",
+                    (body.cliente_negocio_id, cliente["id"]))
+        if not cn:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        cliente_negocio_id = cn["id"]
+
+    conflitos = verificar_conflito_agenda(conn, cliente["id"], data_obj, body.hora_inicio, hora_fim,
+                                           excluir_id=compromisso_id)
+
+    # Se mudou data/hora/lembrete, reseta lembrete_enviado pra poder disparar de novo.
+    lembrete_enviado = existente["lembrete_enviado"]
+    if (str(existente["hora_inicio"])[:5] != body.hora_inicio
+            or existente["lembrete_minutos_antes"] != body.lembrete_minutos_antes
+            or str(existente["data"]) != str(data_obj)):
+        lembrete_enviado = False
+
+    novo_status = body.status if body.status in ("agendado", "concluido", "cancelado") else existente["status"]
+
+    registro = db_exec(conn, """
+        UPDATE agenda_compromissos
+        SET titulo = %s, data = %s, hora_inicio = %s, hora_fim = %s, cliente_negocio_id = %s,
+            notas = %s, lembrete_minutos_antes = %s, lembrete_enviado = %s, status = %s
+        WHERE id = %s RETURNING *
+    """, (body.titulo, data_obj, body.hora_inicio, hora_fim, cliente_negocio_id, body.notas,
+          body.lembrete_minutos_antes, lembrete_enviado, novo_status, compromisso_id))
+
+    resultado = dict(registro)
+    if conflitos:
+        resultado["aviso_conflito"] = [f"{c['titulo']} ({str(c['hora_inicio'])[:5]})" for c in conflitos]
+    return resultado
+
+@app.patch("/agenda/{compromisso_id}/status")
+def mudar_status_compromisso_agenda(compromisso_id: int, body: AgendaStatusBody,
+                                     cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    existente = db_one(conn, "SELECT * FROM agenda_compromissos WHERE id = %s AND cliente_id = %s",
+                        (compromisso_id, cliente["id"]))
+    if not existente:
+        raise HTTPException(status_code=404, detail="Compromisso não encontrado")
+    if body.status not in ("agendado", "concluido", "cancelado"):
+        raise HTTPException(status_code=400, detail="Status inválido")
+    db_exec(conn, "UPDATE agenda_compromissos SET status = %s WHERE id = %s", (body.status, compromisso_id))
+    return {"ok": True}
+
+@app.delete("/agenda/{compromisso_id}")
+def deletar_compromisso_agenda(compromisso_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    existente = db_one(conn, "SELECT * FROM agenda_compromissos WHERE id = %s AND cliente_id = %s",
+                        (compromisso_id, cliente["id"]))
+    if not existente:
+        raise HTTPException(status_code=404, detail="Compromisso não encontrado")
+    db_exec(conn, "DELETE FROM agenda_compromissos WHERE id = %s", (compromisso_id,))
     return {"ok": True}
 
 # ═════════════════════════════════════════
