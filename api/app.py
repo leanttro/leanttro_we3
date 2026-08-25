@@ -239,6 +239,9 @@ class AdminModulosBody(BaseModel):
 class AdminAtivoBody(BaseModel):
     ativo: bool
 
+class AtendimentoClienteFinalBody(BaseModel):
+    ativado: bool
+
 class AdminNumeroBody(BaseModel):
     numero: str
     nome: Optional[str] = None
@@ -367,6 +370,32 @@ def salvar_sessao(conn, numero_autorizado_id: int, etapa: str, dados: dict):
         SET etapa_atual = %s, dados_parciais = %s, atualizado_em = NOW()
         WHERE numero_autorizado_id = %s
     """, (etapa, json.dumps(dados), numero_autorizado_id))
+
+# ── Sessão de CLIENTE FINAL (visitante público, não é funcionário) ──
+def get_or_create_sessao_cliente_final(conn, cliente_id: int, numero: str):
+    sessao = db_one(conn, """
+        SELECT * FROM sessoes_cliente_final WHERE cliente_id = %s AND numero = %s
+    """, (cliente_id, numero))
+    if sessao:
+        return sessao
+    return db_exec(conn, """
+        INSERT INTO sessoes_cliente_final (cliente_id, numero, etapa_atual, dados_parciais)
+        VALUES (%s, %s, 'menu_cliente_final', '{}') RETURNING *
+    """, (cliente_id, numero))
+
+def salvar_sessao_cliente_final(conn, cliente_id: int, numero: str, etapa: str, dados: dict):
+    db_exec(conn, """
+        UPDATE sessoes_cliente_final
+        SET etapa_atual = %s, dados_parciais = %s, atualizado_em = NOW()
+        WHERE cliente_id = %s AND numero = %s
+    """, (etapa, json.dumps(dados), cliente_id, numero))
+
+def buscar_clientes_com_atendimento_ativado(conn):
+    """Todos os clientes (empresas) que ligaram o toggle de atendimento
+    automático ao cliente final."""
+    return db_all(conn, """
+        SELECT * FROM clientes WHERE ativo = TRUE AND atendimento_cliente_final_ativado = TRUE
+    """)
 
 def buscar_produto_por_nome(conn, cliente_id: int, nome: str):
     return db_one(conn, """
@@ -1132,6 +1161,158 @@ def resposta_menu(modulos=None):
     if modulos is not None and "agenda" not in modulos:
         return MENU_TEXTO_SEM_AGENDA
     return MENU_TEXTO
+
+# ═════════════════════════════════════════
+#  ATENDIMENTO AO CLIENTE FINAL (visitante público, mesmo número WhatsApp)
+# ═════════════════════════════════════════
+# Ativado por empresa via toggle no dashboard (atendimento_cliente_final_ativado).
+# Fluxo bem mais enxuto que o do funcionário: só ver produtos/serviços, pedir
+# orçamento e chamar atendente humano — nada de estoque, custo, cadastro etc.
+# "produtos" aqui cobre tanto produto físico quanto serviço — o texto do menu
+# não usa "cardápio" porque nem todo cliente é confeitaria/comida.
+
+MENU_CLIENTE_FINAL = (
+    "👋 Olá! Em que posso ajudar?\n\n"
+    "1️⃣ Ver produtos/serviços\n"
+    "2️⃣ Pedir orçamento\n"
+    "3️⃣ Falar com atendente\n\n"
+    "Responda com o número da opção."
+)
+
+def texto_produtos_servicos_cliente_final(conn, cliente_id: int) -> str:
+    produtos = listar_produtos_cliente(conn, cliente_id)
+    if not produtos:
+        return "No momento não temos produtos/serviços cadastrados. Digite *3* para falar com um atendente."
+    return montar_lista_numerada(
+        produtos, "📦 *Produtos/serviços disponíveis:*",
+        rodape="Digite *menu* para voltar.", mostrar_preco=True
+    )
+
+async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto: str) -> str:
+    """Fluxo simplificado pro cliente final (visitante). `numero` já vem
+    normalizado (só dígitos). Sessão é isolada por (cliente_id, numero) na
+    tabela sessoes_cliente_final — não interfere em nada da sessão de
+    funcionário (sessoes_conversa)."""
+    cliente_id = cliente["id"]
+    sessao = get_or_create_sessao_cliente_final(conn, cliente_id, numero)
+    etapa = sessao["etapa_atual"]
+    dados = sessao["dados_parciais"] if isinstance(sessao["dados_parciais"], dict) else json.loads(sessao["dados_parciais"] or "{}")
+    texto_low = texto.strip().lower()
+
+    if texto_low in ("menu", "0", "cancelar"):
+        salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+        return MENU_CLIENTE_FINAL
+
+    if etapa == "menu_cliente_final":
+        escolha = texto.strip()
+
+        if escolha == "1":
+            salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+            return texto_produtos_servicos_cliente_final(conn, cliente_id)
+
+        if escolha == "2":
+            produtos = listar_produtos_cliente(conn, cliente_id)
+            if not produtos:
+                return "No momento não temos produtos/serviços cadastrados. Digite *3* para falar com um atendente."
+            salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_escolha_produto",
+                                         {"produtos_ids": [p["id"] for p in produtos]})
+            return montar_lista_numerada(
+                produtos, "📋 *Pedir orçamento*\nQual produto/serviço você quer?",
+                rodape="Responda com o número.", mostrar_preco=True
+            )
+
+        if escolha == "3":
+            salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_aguardando_humano", {})
+            return (
+                "📱 Ok! Pode escrever sua mensagem que um atendente vai te responder por aqui assim que possível.\n\n"
+                "Digite *menu* a qualquer momento para voltar às opções."
+            )
+
+        return "Não entendi. " + MENU_CLIENTE_FINAL
+
+    # ── Pedido de orçamento: escolheu o produto, agora pede a quantidade ──
+    if etapa == "cf_orc_escolha_produto":
+        produtos_ids = dados.get("produtos_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(produtos_ids)
+        except (ValueError, AssertionError):
+            return f"Manda só o número do produto (1 a {len(produtos_ids)}), ou *menu* para voltar."
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                          (produtos_ids[idx - 1], cliente_id))
+        if not produto:
+            salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+            return "Esse produto não está mais disponível.\n\n" + MENU_CLIENTE_FINAL
+        salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_quantidade",
+                                     {"produto_id": produto["id"], "produto_nome": produto["nome"],
+                                      "preco_unitario": float(produto["preco_venda"] or 0)})
+        return f"Quantas unidades de *{produto['nome']}* você quer?"
+
+    # ── Pedido de orçamento: informou quantidade, monta e mostra o resumo ──
+    if etapa == "cf_orc_quantidade":
+        try:
+            quantidade = float(texto.strip().replace(",", "."))
+            assert quantidade > 0
+        except (ValueError, AssertionError):
+            return "Manda só a quantidade (um número), por favor."
+        preco_unitario = float(dados.get("preco_unitario") or 0)
+        total = quantidade * preco_unitario
+        dados["quantidade"] = quantidade
+        dados["total"] = total
+        salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_confirmar", dados)
+        return (
+            f"🧾 *Resumo do orçamento*\n\n"
+            f"{dados['produto_nome']} — {formatar_qtd(quantidade)} un.\n"
+            f"Valor unitário: {formatar_moeda(preco_unitario)}\n"
+            f"*Total: {formatar_moeda(total)}*\n\n"
+            "Confirma o envio desse orçamento? (sim/não)"
+        )
+
+    # ── Confirmação final do orçamento — salva vinculado ao negócio, sem tocar estoque ──
+    if etapa == "cf_orc_confirmar":
+        if texto_low in ("sim", "s", "confirmar", "confirmo"):
+            cliente_negocio = db_one(conn, "SELECT * FROM clientes_negocio WHERE cliente_id = %s AND telefone = %s",
+                                      (cliente_id, numero))
+            if not cliente_negocio:
+                cliente_negocio = db_exec(conn, """
+                    INSERT INTO clientes_negocio (cliente_id, nome, telefone)
+                    VALUES (%s, %s, %s) RETURNING *
+                """, (cliente_id, f"Visitante {numero}", numero))
+
+            itens_json = json.dumps([{
+                "produto_id": dados.get("produto_id"),
+                "nome": dados.get("produto_nome"),
+                "quantidade": dados.get("quantidade"),
+                "preco_unitario": dados.get("preco_unitario"),
+            }])
+            total = float(dados.get("total") or 0)
+            texto_formatado = (
+                f"🧾 Orçamento — {cliente.get('nome_negocio','')}\n"
+                f"{dados.get('produto_nome')} x{formatar_qtd(dados.get('quantidade') or 0)} = {formatar_moeda(total)}"
+            )
+            db_exec(conn, """
+                INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, total, texto_formatado, cliente_negocio_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (cliente_id, cliente_negocio["nome"], itens_json, total, total, texto_formatado, cliente_negocio["id"]))
+
+            salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+            return "✅ Orçamento enviado! Em breve alguém confirma com você.\n\n" + MENU_CLIENTE_FINAL
+
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+            return "Sem problemas, cancelado.\n\n" + MENU_CLIENTE_FINAL
+
+        return "Responda *sim* ou *não*."
+
+    # ── Aguardando atendente humano: qualquer coisa que o visitante mandar aqui
+    # fica registrada como orçamento pendente/observação; a dona lê pelo WhatsApp
+    # normal, já que a conversa continua no mesmo número. Não trava o visitante. ──
+    if etapa == "cf_aguardando_humano":
+        return "Recebido! Um atendente vai te responder por aqui. Digite *menu* se quiser ver as opções de novo."
+
+    # fallback: qualquer etapa desconhecida volta pro menu
+    salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+    return MENU_CLIENTE_FINAL
 
 async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: str) -> str:
     numero_autorizado_id = numero_autorizado["id"]
@@ -2917,6 +3098,57 @@ def criar_coluna_movimentacao_id_materia_prima():
     finally:
         conn.close()
 
+def criar_coluna_atendimento_cliente_final():
+    """Adiciona a coluna `atendimento_cliente_final_ativado` na tabela clientes,
+    SE ainda não existir. Controla o toggle do dashboard que liga/desliga o
+    atendimento automático pro cliente final (visitante) no mesmo número
+    WhatsApp. Default FALSE pra não mudar comportamento de ninguém que já
+    está rodando. Mesmo padrão 'self-healing' das outras migrações."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            ALTER TABLE clientes
+            ADD COLUMN IF NOT EXISTS atendimento_cliente_final_ativado BOOLEAN NOT NULL DEFAULT FALSE;
+        """)
+        conn.commit()
+        print("✅ Coluna clientes.atendimento_cliente_final_ativado: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar coluna clientes.atendimento_cliente_final_ativado: {e}")
+    finally:
+        conn.close()
+
+def criar_tabela_sessoes_cliente_final():
+    """Cria a tabela sessoes_cliente_final — sessão de conversa separada da
+    sessoes_conversa (que é só pra número autorizado/funcionário). Guarda em
+    que etapa do menu simplificado (ver produtos, orçamento, falar com
+    atendente) cada visitante está, por empresa. Mesmo padrão 'self-healing'."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sessoes_cliente_final (
+                id               SERIAL PRIMARY KEY,
+                cliente_id       INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                numero           TEXT NOT NULL,
+                etapa_atual      TEXT NOT NULL DEFAULT 'menu_cliente_final',
+                dados_parciais   JSONB NOT NULL DEFAULT '{}',
+                criado_em        TIMESTAMP NOT NULL DEFAULT NOW(),
+                atualizado_em    TIMESTAMP NOT NULL DEFAULT NOW(),
+                UNIQUE (cliente_id, numero)
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS ix_sessoes_cliente_final_cliente_numero
+            ON sessoes_cliente_final (cliente_id, numero);
+        """)
+        conn.commit()
+        print("✅ Tabela sessoes_cliente_final: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela sessoes_cliente_final: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -2931,6 +3163,8 @@ async def lifespan(app: FastAPI):
     criar_tabela_agenda_compromissos()
     criar_coluna_modulos_clientes()
     criar_coluna_movimentacao_id_materia_prima()
+    criar_coluna_atendimento_cliente_final()
+    criar_tabela_sessoes_cliente_final()
     
     # 2️⃣ Testar conexão com banco
     try:
@@ -2978,6 +3212,17 @@ def login(body: LoginBody, conn=Depends(get_db)):
 @app.get("/auth/me")
 def me(cliente=Depends(get_current_cliente)):
     return {k: v for k, v in cliente.items() if k != "senha_hash"}
+
+@app.patch("/cliente/atendimento-cliente-final")
+def alterar_atendimento_cliente_final(body: AtendimentoClienteFinalBody,
+                                       cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Liga/desliga o atendimento automático simplificado (menu de produtos,
+    orçamento e 'falar com atendente') pro cliente final da empresa, no mesmo
+    número WhatsApp. Só afeta números que já estão cadastrados em
+    clientes-negocio dessa empresa — números aleatórios continuam bloqueados."""
+    db_exec(conn, "UPDATE clientes SET atendimento_cliente_final_ativado = %s WHERE id = %s",
+            (body.ativado, cliente["id"]))
+    return {"ok": True, "atendimento_cliente_final_ativado": body.ativado}
 
 # ═════════════════════════════════════════
 #  ADMIN — gestão de clientes/números/conexão
@@ -3999,17 +4244,42 @@ async def webhook_mensagem(payload: dict, conn=Depends(get_db)):
     # criptografia do WhatsApp e a mensagem fica "Aguardando mensagem".
     numero = normalizar_numero(numero_resolvido or remote_jid)
     numero_autorizado = buscar_numero_autorizado(conn, numero)
-    if not numero_autorizado:
-        await enviar_whatsapp(remote_jid, "❌ Número não autorizado. Fale com o administrador do sistema.")
+
+    if numero_autorizado:
+        # ── MODO FUNCIONÁRIO/DONA — menu completo (estoque, vendas, agenda etc) ──
+        cliente = db_one(conn, "SELECT * FROM clientes WHERE id = %s AND ativo = TRUE", (numero_autorizado["cliente_id"],))
+        if not cliente:
+            await enviar_whatsapp(remote_jid, "❌ Conta inativa. Fale com o administrador.")
+            return {"ok": True}
+
+        resposta = await processar_texto(conn, cliente, numero_autorizado, texto)
+        await enviar_whatsapp(remote_jid, resposta)
         return {"ok": True}
 
-    cliente = db_one(conn, "SELECT * FROM clientes WHERE id = %s AND ativo = TRUE", (numero_autorizado["cliente_id"],))
-    if not cliente:
-        await enviar_whatsapp(remote_jid, "❌ Conta inativa. Fale com o administrador.")
-        return {"ok": True}
+    # ── Não é funcionário: será que é cliente final de alguma empresa? ──
+    # Número é reconhecido pela ficha em clientes_negocio (telefone), e só
+    # entra no menu simplificado se aquela empresa ligou o toggle no
+    # dashboard. Isso evita responder em nome da empresa errada quando o
+    # mesmo número compartilhado atende negócios diferentes.
+    cliente_negocio = db_one(conn, """
+        SELECT cn.*, c.id AS cliente_id, c.nome_negocio, c.ativo AS cliente_ativo,
+               c.atendimento_cliente_final_ativado
+        FROM clientes_negocio cn
+        JOIN clientes c ON c.id = cn.cliente_id
+        WHERE cn.telefone = %s AND c.atendimento_cliente_final_ativado = TRUE AND c.ativo = TRUE
+        ORDER BY cn.criado_em DESC
+        LIMIT 1
+    """, (numero,))
 
-    resposta = await processar_texto(conn, cliente, numero_autorizado, texto)
-    await enviar_whatsapp(remote_jid, resposta)
+    if cliente_negocio:
+        cliente = db_one(conn, "SELECT * FROM clientes WHERE id = %s AND ativo = TRUE", (cliente_negocio["cliente_id"],))
+        if cliente:
+            # ── MODO CLIENTE FINAL — menu simplificado (ver produtos, orçamento, atendente) ──
+            resposta = await processar_texto_cliente_final(conn, cliente, numero, texto)
+            await enviar_whatsapp(remote_jid, resposta)
+            return {"ok": True}
+
+    await enviar_whatsapp(remote_jid, "❌ Número não autorizado. Fale com o administrador do sistema.")
     return {"ok": True}
 
 @app.get("/whatsapp/status")
