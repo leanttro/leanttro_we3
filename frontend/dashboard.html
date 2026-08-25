@@ -418,6 +418,129 @@
             gap: 10px;
         }
 
+        .agenda-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+
+        .agenda-titulo-periodo {
+            font-size: 17px;
+            font-weight: 600;
+            color: #333;
+            text-transform: capitalize;
+            min-width: 180px;
+        }
+
+        .calendario-mes-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+        }
+
+        .calendario-cabecalho {
+            text-align: center;
+            font-weight: 600;
+            color: #667eea;
+            font-size: 13px;
+            padding: 6px 0;
+        }
+
+        .calendario-dia-cell {
+            background: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            min-height: 90px;
+            padding: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .calendario-dia-cell:hover {
+            background: #f0f4ff;
+        }
+
+        .calendario-dia-cell.fora-mes {
+            opacity: 0.4;
+        }
+
+        .calendario-dia-cell.dia-hoje {
+            border: 2px solid #667eea;
+        }
+
+        .calendario-dia-num {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 4px;
+        }
+
+        .calendario-compromisso-chip {
+            background: #667eea;
+            color: white;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 3px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .calendario-compromisso-chip.cancelado {
+            background: #bbb;
+            text-decoration: line-through;
+        }
+
+        .calendario-semana-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+        }
+
+        .calendario-dia-semana {
+            background: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            min-height: 200px;
+            padding: 8px;
+        }
+
+        .calendario-dia-semana.dia-hoje {
+            border: 2px solid #667eea;
+        }
+
+        .calendario-dia-semana-header {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+            cursor: pointer;
+            text-transform: capitalize;
+        }
+
+        .calendario-vazio {
+            color: #ccc;
+            font-size: 12px;
+        }
+
+        .calendario-dia-view .agendamento-card {
+            border-left-color: #667eea;
+        }
+
+        @media (max-width: 768px) {
+            .calendario-mes-grid, .calendario-semana-grid {
+                grid-template-columns: repeat(7, minmax(40px, 1fr));
+                font-size: 11px;
+            }
+            .calendario-dia-cell, .calendario-dia-semana {
+                min-height: 60px;
+                padding: 4px;
+            }
+        }
+
         #loading {
             text-align: center;
             padding: 20px;
@@ -589,6 +712,7 @@
             <button class="tab-btn" onclick="abrirAba('orcamentos')">🧾 Orçamentos</button>
             <button class="tab-btn" onclick="abrirAba('clientes')">👤 Clientes</button>
             <button class="tab-btn" onclick="abrirAba('custos')">🧮 Custos</button>
+            <button class="tab-btn" onclick="abrirAba('agenda')">🗓️ Agenda</button>
         </div>
 
         <!-- ABA PRODUTOS -->
@@ -773,6 +897,28 @@
                     <div style="font-size:20px; color:#667eea; margin-top:10px;"><strong>Preço sugerido: <span id="resPrecoSugerido"></span></strong></div>
                 </div>
             </div>
+        </div>
+
+        <!-- ABA AGENDA -->
+        <div id="tab-agenda" class="tab-content">
+            <div class="section-title">
+                Agenda
+                <div class="export-buttons">
+                    <button class="btn btn-secondary btn-small" onclick="mudarVisaoAgenda('mes')">Mês</button>
+                    <button class="btn btn-secondary btn-small" onclick="mudarVisaoAgenda('semana')">Semana</button>
+                    <button class="btn btn-secondary btn-small" onclick="mudarVisaoAgenda('dia')">Dia</button>
+                    <button class="btn btn-success btn-small" onclick="abrirModalCompromisso()">➕ Novo Compromisso</button>
+                </div>
+            </div>
+
+            <div class="agenda-toolbar">
+                <button class="btn btn-secondary btn-small" onclick="navegarAgenda(-1)">◀</button>
+                <div id="agendaTituloPeriodo" class="agenda-titulo-periodo">—</div>
+                <button class="btn btn-secondary btn-small" onclick="navegarAgenda(1)">▶</button>
+                <button class="btn btn-secondary btn-small" onclick="irParaHojeAgenda()">Hoje</button>
+            </div>
+
+            <div id="agendaCalendario"></div>
         </div>
     </div>
 
@@ -989,6 +1135,55 @@
         </div>
     </div>
 
+    <!-- Modal Compromisso da Agenda -->
+    <div id="modalCompromisso" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalCompromissoTitulo">Novo Compromisso</div>
+            <div class="modal-body">
+                <input type="hidden" id="compromissoEditandoId" value="">
+                <div class="form-group">
+                    <label>Título</label>
+                    <input type="text" id="tituloCompromisso" placeholder="Ex: Consulta, Reunião, Dentista...">
+                </div>
+                <div class="form-group">
+                    <label>Data</label>
+                    <input type="date" id="dataCompromisso">
+                </div>
+                <div class="form-group">
+                    <label>Hora início</label>
+                    <input type="time" id="horaInicioCompromisso">
+                </div>
+                <div class="form-group">
+                    <label>Hora fim (opcional)</label>
+                    <input type="time" id="horaFimCompromisso">
+                </div>
+                <div class="form-group">
+                    <label>Cliente vinculado (opcional)</label>
+                    <select id="selectClienteCompromisso">
+                        <option value="">Nenhum</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Notas</label>
+                    <textarea id="notasCompromisso" placeholder="Alguma observação?"></textarea>
+                </div>
+                <div class="form-group" style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" id="lembreteAtivoCompromisso" style="width:auto;" onchange="toggleLembreteCompromisso()">
+                    <label style="margin:0;">Enviar lembrete por WhatsApp</label>
+                </div>
+                <div class="form-group" id="grupoLembreteMinutos" style="display:none;">
+                    <label>Minutos antes</label>
+                    <input type="number" id="lembreteMinutosCompromisso" value="30" step="1" min="1">
+                </div>
+                <div id="avisoConflitoCompromisso" style="display:none; color:#c0392b; background:#fdecea; padding:10px; border-radius:6px; margin-top:10px; font-size:13px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-success" onclick="salvarCompromisso()">Salvar</button>
+                <button class="btn btn-secondary" onclick="fecharModal('modalCompromisso')" style="background:#999">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API_URL = window.location.origin;
         const token = localStorage.getItem('token');
@@ -1000,6 +1195,46 @@
         let produtos = [];
         let materiasPrimas = [];
         let agendamentos = [];
+        let clienteAtual = null;
+
+        async function carregarClienteAtual() {
+            try {
+                const res = await fetch(`${API_URL}/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) return;
+                clienteAtual = await res.json();
+                aplicarModulosNaUI(clienteAtual.modulos && clienteAtual.modulos.length ? clienteAtual.modulos : ['estoque']);
+            } catch (err) {
+                console.error('Erro ao carregar dados do cliente:', err);
+            }
+        }
+
+        // Mostra/esconde abas conforme os módulos ativos do cliente (estoque/agenda).
+        // 'clientes' fica sempre visível — é compartilhada pelos dois módulos.
+        function aplicarModulosNaUI(modulos) {
+            const abasEstoque = ['produtos', 'agendamentos', 'materias', 'vendas', 'orcamentos', 'custos'];
+            const abasAgenda = ['agenda'];
+            const temEstoque = modulos.includes('estoque');
+            const temAgenda = modulos.includes('agenda');
+
+            const aplicar = (abas, visivel) => {
+                abas.forEach(aba => {
+                    const btn = document.querySelector(`.tab-btn[onclick="abrirAba('${aba}')"]`);
+                    const conteudo = document.getElementById(`tab-${aba}`);
+                    if (btn) btn.style.display = visivel ? '' : 'none';
+                    if (conteudo && !visivel) conteudo.classList.remove('active');
+                });
+            };
+            aplicar(abasEstoque, temEstoque);
+            aplicar(abasAgenda, temAgenda);
+
+            const abaAtivaBtn = document.querySelector('.tab-btn.active');
+            if (abaAtivaBtn && abaAtivaBtn.style.display === 'none') {
+                const primeiraDisponivel = document.querySelector('.tab-btn:not([style*="display: none"])');
+                if (primeiraDisponivel) primeiraDisponivel.click();
+            }
+        }
 
         async function carregarProdutos() {
             try {
@@ -1998,8 +2233,271 @@
             localStorage.clear();
             window.location.href = 'login.html';
         }
-        
+
+        // ═════════════════════════════════════
+        //  AGENDA — calendário dia / semana / mês
+        // ═════════════════════════════════════
+        let agendaCompromissos = [];
+        let agendaVisao = 'mes'; // 'mes' | 'semana' | 'dia'
+        let agendaDataRef = new Date();
+
+        function formatarDataISO(d) {
+            const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dia = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dia}`;
+        }
+
+        function inicioSemana(d) {
+            const dt = new Date(d);
+            dt.setDate(dt.getDate() - dt.getDay());
+            dt.setHours(0, 0, 0, 0);
+            return dt;
+        }
+
+        function calcularIntervaloAgenda() {
+            const d = agendaDataRef;
+            if (agendaVisao === 'mes') {
+                const inicioMes = new Date(d.getFullYear(), d.getMonth(), 1);
+                const fimMes = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+                const inicio = inicioSemana(inicioMes);
+                const fim = inicioSemana(fimMes);
+                fim.setDate(fim.getDate() + 6);
+                return [inicio, fim];
+            }
+            if (agendaVisao === 'semana') {
+                const inicio = inicioSemana(d);
+                const fim = new Date(inicio);
+                fim.setDate(fim.getDate() + 6);
+                return [inicio, fim];
+            }
+            const inicio = new Date(d); inicio.setHours(0, 0, 0, 0);
+            return [inicio, inicio];
+        }
+
+        async function carregarAgenda() {
+            const [inicio, fim] = calcularIntervaloAgenda();
+            try {
+                const res = await fetch(`${API_URL}/agenda?inicio=${formatarDataISO(inicio)}&fim=${formatarDataISO(fim)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                agendaCompromissos = await res.json();
+                exibirAgenda();
+            } catch (err) {
+                console.error('Erro:', err);
+            }
+        }
+
+        function mudarVisaoAgenda(visao) {
+            agendaVisao = visao;
+            carregarAgenda();
+        }
+
+        function navegarAgenda(direcao) {
+            const d = new Date(agendaDataRef);
+            if (agendaVisao === 'mes') d.setMonth(d.getMonth() + direcao);
+            else if (agendaVisao === 'semana') d.setDate(d.getDate() + direcao * 7);
+            else d.setDate(d.getDate() + direcao);
+            agendaDataRef = d;
+            carregarAgenda();
+        }
+
+        function irParaHojeAgenda() {
+            agendaDataRef = new Date();
+            carregarAgenda();
+        }
+
+        function compromissosDoDia(dataISO) {
+            return agendaCompromissos
+                .filter(c => c.data === dataISO)
+                .sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
+        }
+
+        function exibirAgenda() {
+            const container = document.getElementById('agendaCalendario');
+            const tituloEl = document.getElementById('agendaTituloPeriodo');
+            const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+            const diasSemana = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+            const hojeISO = formatarDataISO(new Date());
+
+            if (agendaVisao === 'mes') {
+                tituloEl.textContent = `${meses[agendaDataRef.getMonth()]} ${agendaDataRef.getFullYear()}`;
+                const [inicio] = calcularIntervaloAgenda();
+                const mesAtual = agendaDataRef.getMonth();
+                let html = '<div class="calendario-mes-grid">';
+                diasSemana.forEach(ds => html += `<div class="calendario-cabecalho">${ds}</div>`);
+                const cursor = new Date(inicio);
+                for (let i = 0; i < 42; i++) {
+                    const iso = formatarDataISO(cursor);
+                    const foraDoMes = cursor.getMonth() !== mesAtual;
+                    const compromissosDia = compromissosDoDia(iso);
+                    html += `<div class="calendario-dia-cell ${foraDoMes ? 'fora-mes' : ''} ${iso === hojeISO ? 'dia-hoje' : ''}" onclick="abrirModalCompromisso('${iso}')">
+                        <div class="calendario-dia-num">${cursor.getDate()}</div>
+                        ${compromissosDia.slice(0, 3).map(c => `<div class="calendario-compromisso-chip ${c.status === 'cancelado' ? 'cancelado' : ''}" onclick="event.stopPropagation(); abrirModalCompromissoEditar(${c.id})">${c.hora_inicio.slice(0,5)} ${c.titulo}</div>`).join('')}
+                        ${compromissosDia.length > 3 ? `<div style="font-size:11px;color:#999;">+${compromissosDia.length - 3} mais</div>` : ''}
+                    </div>`;
+                    cursor.setDate(cursor.getDate() + 1);
+                }
+                html += '</div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            if (agendaVisao === 'semana') {
+                const [inicio] = calcularIntervaloAgenda();
+                tituloEl.textContent = `Semana de ${inicio.toLocaleDateString('pt-BR')}`;
+                let html = '<div class="calendario-semana-grid">';
+                const cursor = new Date(inicio);
+                for (let i = 0; i < 7; i++) {
+                    const iso = formatarDataISO(cursor);
+                    const compromissosDia = compromissosDoDia(iso);
+                    html += `<div class="calendario-dia-semana ${iso === hojeISO ? 'dia-hoje' : ''}">
+                        <div class="calendario-dia-semana-header" onclick="abrirModalCompromisso('${iso}')">${diasSemana[cursor.getDay()]} ${cursor.getDate()}</div>
+                        ${compromissosDia.map(c => `<div class="calendario-compromisso-chip ${c.status === 'cancelado' ? 'cancelado' : ''}" onclick="abrirModalCompromissoEditar(${c.id})">${c.hora_inicio.slice(0,5)} — ${c.titulo}</div>`).join('') || '<div class="calendario-vazio">Sem compromissos</div>'}
+                    </div>`;
+                    cursor.setDate(cursor.getDate() + 1);
+                }
+                html += '</div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            // visão dia
+            const iso = formatarDataISO(agendaDataRef);
+            tituloEl.textContent = agendaDataRef.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+            const compromissosDia = compromissosDoDia(iso);
+            let html = '<div class="calendario-dia-view">';
+            if (compromissosDia.length === 0) {
+                html += '<div style="padding:20px; text-align:center; color:#999;">Nenhum compromisso nesse dia.</div>';
+            } else {
+                compromissosDia.forEach(c => {
+                    html += `<div class="agendamento-card">
+                        <div class="agendamento-info">
+                            <strong>${c.hora_inicio.slice(0,5)}${c.hora_fim ? ' - ' + c.hora_fim.slice(0,5) : ''} — ${c.titulo}</strong>
+                            ${c.cliente_negocio_nome ? `<small>👤 ${c.cliente_negocio_nome}</small>` : ''}
+                            ${c.notas ? `<small style="display:block; color:#666;">📝 ${c.notas}</small>` : ''}
+                            ${c.status === 'cancelado' ? '<small style="color:#c0392b;">Cancelado</small>' : ''}
+                        </div>
+                        <div class="agendamento-actions">
+                            <button class="btn btn-secondary btn-small" onclick="abrirModalCompromissoEditar(${c.id})">✏️</button>
+                            <button class="btn btn-secondary btn-small" onclick="deletarCompromisso(${c.id})">🗑️</button>
+                        </div>
+                    </div>`;
+                });
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function toggleLembreteCompromisso() {
+            const ativo = document.getElementById('lembreteAtivoCompromisso').checked;
+            document.getElementById('grupoLembreteMinutos').style.display = ativo ? 'block' : 'none';
+        }
+
+        function preencherSelectClienteCompromisso() {
+            const select = document.getElementById('selectClienteCompromisso');
+            select.innerHTML = '<option value="">Nenhum</option>' +
+                clientesNegocio.map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+        }
+
+        function abrirModalCompromisso(dataISO) {
+            document.getElementById('modalCompromissoTitulo').textContent = 'Novo Compromisso';
+            document.getElementById('compromissoEditandoId').value = '';
+            document.getElementById('tituloCompromisso').value = '';
+            document.getElementById('dataCompromisso').value = dataISO || formatarDataISO(new Date());
+            document.getElementById('horaInicioCompromisso').value = '';
+            document.getElementById('horaFimCompromisso').value = '';
+            document.getElementById('notasCompromisso').value = '';
+            document.getElementById('lembreteAtivoCompromisso').checked = false;
+            document.getElementById('lembreteMinutosCompromisso').value = 30;
+            document.getElementById('grupoLembreteMinutos').style.display = 'none';
+            document.getElementById('avisoConflitoCompromisso').style.display = 'none';
+            preencherSelectClienteCompromisso();
+            document.getElementById('selectClienteCompromisso').value = '';
+            document.getElementById('modalCompromisso').classList.add('show');
+        }
+
+        function abrirModalCompromissoEditar(id) {
+            const c = agendaCompromissos.find(x => x.id === id);
+            if (!c) return;
+            document.getElementById('modalCompromissoTitulo').textContent = 'Editar Compromisso';
+            document.getElementById('compromissoEditandoId').value = c.id;
+            document.getElementById('tituloCompromisso').value = c.titulo;
+            document.getElementById('dataCompromisso').value = c.data;
+            document.getElementById('horaInicioCompromisso').value = c.hora_inicio.slice(0, 5);
+            document.getElementById('horaFimCompromisso').value = c.hora_fim ? c.hora_fim.slice(0, 5) : '';
+            document.getElementById('notasCompromisso').value = c.notas || '';
+            const temLembrete = c.lembrete_minutos_antes !== null && c.lembrete_minutos_antes !== undefined;
+            document.getElementById('lembreteAtivoCompromisso').checked = temLembrete;
+            document.getElementById('lembreteMinutosCompromisso').value = temLembrete ? c.lembrete_minutos_antes : 30;
+            document.getElementById('grupoLembreteMinutos').style.display = temLembrete ? 'block' : 'none';
+            document.getElementById('avisoConflitoCompromisso').style.display = 'none';
+            preencherSelectClienteCompromisso();
+            document.getElementById('selectClienteCompromisso').value = c.cliente_negocio_id || '';
+            document.getElementById('modalCompromisso').classList.add('show');
+        }
+
+        async function salvarCompromisso() {
+            const id = document.getElementById('compromissoEditandoId').value;
+            const titulo = document.getElementById('tituloCompromisso').value.trim();
+            const data = document.getElementById('dataCompromisso').value;
+            const horaInicio = document.getElementById('horaInicioCompromisso').value;
+            const horaFim = document.getElementById('horaFimCompromisso').value;
+            const clienteNegocioId = document.getElementById('selectClienteCompromisso').value;
+            const notas = document.getElementById('notasCompromisso').value;
+            const lembreteAtivo = document.getElementById('lembreteAtivoCompromisso').checked;
+            const lembreteMinutos = parseInt(document.getElementById('lembreteMinutosCompromisso').value) || 30;
+
+            if (!titulo || !data || !horaInicio) {
+                alert('Preencha título, data e hora de início');
+                return;
+            }
+
+            const payload = {
+                titulo,
+                data,
+                hora_inicio: horaInicio,
+                hora_fim: horaFim || null,
+                cliente_negocio_id: clienteNegocioId ? parseInt(clienteNegocioId) : null,
+                notas: notas || null,
+                lembrete_minutos_antes: lembreteAtivo ? lembreteMinutos : null
+            };
+
+            try {
+                const url = id ? `${API_URL}/agenda/${id}` : `${API_URL}/agenda`;
+                const metodo = id ? 'PUT' : 'POST';
+                const res = await fetch(url, {
+                    method: metodo,
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Erro ao salvar compromisso');
+                const resultado = await res.json();
+
+                fecharModal('modalCompromisso');
+                await carregarAgenda();
+
+                if (resultado.aviso_conflito && resultado.aviso_conflito.length > 0) {
+                    alert('⚠️ Compromisso salvo, mas há conflito de horário com: ' + resultado.aviso_conflito.join(', '));
+                }
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        async function deletarCompromisso(id) {
+            if (!confirm('Excluir este compromisso?')) return;
+            try {
+                const res = await fetch(`${API_URL}/agenda/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) carregarAgenda();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
         // Carregar dados ao iniciar
+        carregarClienteAtual();
         carregarProdutos();
         carregarMateriasPrimas();
         carregarAgendamentos();
@@ -2007,6 +2505,7 @@
         carregarOrcamentos();
         carregarClientesNegocio();
         carregarCustosFixos();
+        carregarAgenda();
     </script>
 </body>
 </html>
