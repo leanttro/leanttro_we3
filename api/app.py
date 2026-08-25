@@ -2179,7 +2179,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                              cliente_negocio_id=cliente_negocio_id)
         salvar_sessao(conn, numero_autorizado_id, "menu", {})
         return (
-            "✅ Orçamento pronto!\n\n"
+            "📋 Segue o orçamento! Confira os detalhes:\n\n"
             "━━━━━━━━━━━━━━━\n"
             f"{texto_formatado}\n"
             "━━━━━━━━━━━━━━━"
