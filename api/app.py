@@ -1184,7 +1184,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                              ajuste_tipo, ajuste_calculado, total, texto_formatado, None)
         salvar_sessao(conn, numero_autorizado_id, "menu", {})
         return (
-            "✅ Orçamento pronto! Copia a mensagem abaixo e encaminha pro seu cliente:\n\n"
+            "✅ Orçamento pronto!\n\n"
             "━━━━━━━━━━━━━━━\n"
             f"{texto_formatado}\n"
             "━━━━━━━━━━━━━━━"
