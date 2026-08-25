@@ -895,6 +895,29 @@
         </div>
     </div>
 
+    <!-- Modal Receita (vínculo produto ↔ matérias-primas) -->
+    <div id="modalReceita" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalReceitaTitulo">Receita do Produto</div>
+            <div class="modal-body">
+                <input type="hidden" id="receitaProdutoId" value="">
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">
+                    Vincule as matérias-primas usadas neste produto. A cada venda, elas são descontadas
+                    automaticamente do estoque, na quantidade informada aqui.
+                </p>
+                <div id="listaReceitaItens"></div>
+                <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px;" onclick="adicionarLinhaReceita()">➕ Adicionar matéria-prima</button>
+                <div id="receitaSemMateriaPrima" style="display:none; color:#999; font-size:13px; margin-top:10px;">
+                    Você ainda não tem matéria-prima cadastrada. Cadastre na aba Matérias-Primas antes de montar a receita.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="salvarReceita()">Salvar</button>
+                <button class="btn btn-secondary" onclick="fecharModal('modalReceita')" style="background:#999">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal Texto do Orçamento -->
     <div id="modalTextoOrcamento" class="modal">
         <div class="modal-content" style="max-width: 600px;">
@@ -1699,6 +1722,90 @@
             }
         }
 
+        // ═════════════════════════════════════
+        //  RECEITA (vínculo produto ↔ matérias-primas)
+        // ═════════════════════════════════════
+        async function abrirModalReceita(produtoId) {
+            const p = produtos.find(x => x.id === produtoId);
+            if (!p) return;
+            document.getElementById('modalReceitaTitulo').textContent = `Receita — ${p.nome}`;
+            document.getElementById('receitaProdutoId').value = produtoId;
+            document.getElementById('listaReceitaItens').innerHTML = '';
+            document.getElementById('receitaSemMateriaPrima').style.display = materiasPrimas.length === 0 ? 'block' : 'none';
+
+            let itensExistentes = [];
+            try {
+                const res = await fetch(`${API_URL}/produtos/${produtoId}/receita`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) itensExistentes = await res.json();
+            } catch (err) {
+                console.error('Erro ao carregar receita:', err);
+            }
+
+            if (itensExistentes.length === 0) {
+                if (materiasPrimas.length > 0) adicionarLinhaReceita();
+            } else {
+                itensExistentes.forEach(item => adicionarLinhaReceita(item.materia_prima_id, item.quantidade_necessaria));
+            }
+
+            document.getElementById('modalReceita').classList.add('show');
+        }
+
+        function adicionarLinhaReceita(materiaPrimaIdSelecionada, quantidade) {
+            const div = document.getElementById('listaReceitaItens');
+            const linhaId = 'receitaLinha' + Date.now() + Math.floor(Math.random() * 1000);
+            const opcoes = materiasPrimas.map(m =>
+                `<option value="${m.id}" ${m.id === materiaPrimaIdSelecionada ? 'selected' : ''}>${m.nome} (${m.unidade || 'un'})</option>`
+            ).join('');
+
+            const linha = document.createElement('div');
+            linha.id = linhaId;
+            linha.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+            linha.innerHTML = `
+                <select style="flex:2;" class="receita-materia-select">
+                    <option value="">Selecione a matéria-prima</option>
+                    ${opcoes}
+                </select>
+                <input type="number" step="0.001" placeholder="Qtd por unidade" style="flex:1;"
+                       class="receita-qtd-input" value="${quantidade != null ? quantidade : ''}">
+                <button type="button" class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;"
+                        onclick="document.getElementById('${linhaId}').remove()">🗑️</button>
+            `;
+            div.appendChild(linha);
+        }
+
+        async function salvarReceita() {
+            const produtoId = document.getElementById('receitaProdutoId').value;
+            const linhas = document.querySelectorAll('#listaReceitaItens > div');
+            const itens = [];
+
+            for (const linha of linhas) {
+                const materiaId = linha.querySelector('.receita-materia-select').value;
+                const qtd = linha.querySelector('.receita-qtd-input').value;
+                if (!materiaId || !qtd) continue;
+                itens.push({ materia_prima_id: parseInt(materiaId), quantidade_necessaria: parseFloat(qtd) });
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/produtos/${produtoId}/receita`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ itens })
+                });
+                if (!res.ok) {
+                    const erro = await res.json().catch(() => ({}));
+                    throw new Error(erro.detail || 'Erro ao salvar receita');
+                }
+                fecharModal('modalReceita');
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
         function abrirModalMateriaPrima() {
             document.getElementById('modalMateriaPrima').classList.add('show');
         }
@@ -1854,8 +1961,16 @@
             })
             .then(res => res.json())
             .then(data => {
-                alert(`✅ ${data.produtos_criados} produtos importados com sucesso!`);
+                let msg = `✅ ${data.produtos_criados} produtos importados`;
+                if (data.materias_primas_criadas) msg += `, ${data.materias_primas_criadas} matérias-primas criadas`;
+                if (data.receitas_vinculadas) msg += `, ${data.receitas_vinculadas} vínculos de receita salvos`;
+                msg += '!';
+                if (data.avisos && data.avisos.length > 0) {
+                    msg += `\n\n⚠️ Alguns itens da aba Receita não foram vinculados:\n` + data.avisos.join('\n');
+                }
+                alert(msg);
                 carregarProdutos();
+                carregarMateriasPrimas();
                 document.getElementById('fileImportProdutos').value = '';
             })
             .catch(err => alert('Erro ao importar: ' + err.message));
