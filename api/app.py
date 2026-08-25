@@ -2906,21 +2906,37 @@ def export_excel(de: Optional[str] = None, ate: Optional[str] = None,
 
 @app.get("/dashboard/template-excel")
 def template_excel(cliente=Depends(get_current_cliente)):
-    """Retorna um template Excel vazio pra cliente preencher e importar"""
+    """Retorna um template Excel vazio pra cliente preencher e importar.
+    Tem 3 abas: Produtos, Matérias-Primas e Receita — a aba Receita é o que
+    liga um produto às matérias-primas dele (o vínculo em si), usando o
+    NOME de cada um pra achar o registro certo (não precisa saber o ID)."""
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Produtos"
-    ws.append(["Nome do Produto", "SKU", "Custo Unitário", "Preço de Venda", "Estoque Atual", "Unidade"])
-    
-    # Adiciona uma linha de exemplo
-    ws.append(["Exemplo: Hambúrguer", "HAM-001", "5.50", "15.00", "10", "un"])
-    
-    # Formata o header
-    for cell in ws[1]:
-        cell.font = openpyxl.styles.Font(bold=True)
-        cell.fill = openpyxl.styles.PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-    
+
+    def formatar_header(ws):
+        for cell in ws[1]:
+            cell.fill = openpyxl.styles.PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+
+    ws_produtos = wb.active
+    ws_produtos.title = "Produtos"
+    ws_produtos.append(["Nome do Produto", "SKU", "Custo Unitário", "Preço de Venda", "Estoque Atual", "Unidade"])
+    ws_produtos.append(["Exemplo: Hambúrguer", "HAM-001", "5.50", "15.00", "10", "un"])
+    formatar_header(ws_produtos)
+
+    ws_materias = wb.create_sheet("Matérias-Primas")
+    ws_materias.append(["Nome da Matéria-Prima", "SKU", "Custo Unitário", "Estoque Atual", "Unidade"])
+    ws_materias.append(["Exemplo: Pão", "PAO-001", "0.80", "50", "un"])
+    formatar_header(ws_materias)
+
+    ws_receita = wb.create_sheet("Receita")
+    ws_receita.append(["Nome do Produto", "Nome da Matéria-Prima", "Quantidade por Unidade"])
+    ws_receita.append(["Exemplo: Hambúrguer", "Exemplo: Pão", "1"])
+    ws_receita.append(["Exemplo: Hambúrguer", "Exemplo: Carne", "0.15"])
+    formatar_header(ws_receita)
+    ws_receita.column_dimensions["A"].width = 25
+    ws_receita.column_dimensions["B"].width = 25
+    ws_receita.column_dimensions["C"].width = 22
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -2931,22 +2947,33 @@ def template_excel(cliente=Depends(get_current_cliente)):
 
 @app.post("/produtos/importar-excel")
 async def importar_excel(file: UploadFile = File(...), cliente=Depends(get_current_cliente), conn=Depends(get_db)):
-    """Importa produtos de um arquivo Excel"""
+    """Importa produtos, matérias-primas e a receita (vínculo produto ↔ matéria-prima)
+    de um arquivo Excel. As abas Matérias-Primas e Receita são opcionais — um arquivo
+    só com a aba Produtos (template antigo) continua funcionando normalmente."""
     try:
         conteudo = await file.read()
-        df = pd.read_excel(io.BytesIO(conteudo))
-        
+        planilhas = pd.read_excel(io.BytesIO(conteudo), sheet_name=None)
+
+        # Aceita tanto o arquivo novo (3 abas) quanto o antigo (1 aba sem nome específico)
+        df_produtos = planilhas.get("Produtos")
+        if df_produtos is None:
+            # Template antigo: uma aba só, sem nome "Produtos" — usa a primeira
+            primeira_aba = next(iter(planilhas.values()))
+            df_produtos = primeira_aba
+        df_materias = planilhas.get("Matérias-Primas")
+        df_receita = planilhas.get("Receita")
+
         colunas_esperadas = ["Nome do Produto", "SKU", "Custo Unitário", "Preço de Venda", "Estoque Atual", "Unidade"]
         for col in colunas_esperadas:
-            if col not in df.columns:
-                raise HTTPException(status_code=400, detail=f"Coluna ausente: {col}")
-        
+            if col not in df_produtos.columns:
+                raise HTTPException(status_code=400, detail=f"Coluna ausente na aba Produtos: {col}")
+
         produtos_criados = 0
-        for idx, row in df.iterrows():
+        for idx, row in df_produtos.iterrows():
             nome = str(row["Nome do Produto"]).strip()
             if not nome or nome.startswith("Exemplo"):
                 continue
-            
+
             try:
                 db_exec(conn, """
                     INSERT INTO produtos (cliente_id, nome, sku, custo_unitario, preco_venda, estoque_atual, unidade, ativo)
@@ -2962,9 +2989,97 @@ async def importar_excel(file: UploadFile = File(...), cliente=Depends(get_curre
                 ))
                 produtos_criados += 1
             except Exception as e:
-                print(f"Erro ao importar linha {idx}: {e}")
-        
-        return {"ok": True, "produtos_criados": produtos_criados}
+                print(f"Erro ao importar linha {idx} (Produtos): {e}")
+
+        materias_criadas = 0
+        if df_materias is not None:
+            colunas_materias = ["Nome da Matéria-Prima", "SKU", "Custo Unitário", "Estoque Atual", "Unidade"]
+            for col in colunas_materias:
+                if col not in df_materias.columns:
+                    raise HTTPException(status_code=400, detail=f"Coluna ausente na aba Matérias-Primas: {col}")
+
+            for idx, row in df_materias.iterrows():
+                nome = str(row["Nome da Matéria-Prima"]).strip()
+                if not nome or nome.startswith("Exemplo"):
+                    continue
+                try:
+                    # Evita duplicar se a matéria-prima já existe (importante pra reimportar o mesmo
+                    # arquivo depois de editar só a aba Receita, sem duplicar o cadastro)
+                    ja_existe = buscar_materia_prima_por_nome(conn, cliente["id"], nome)
+                    if ja_existe:
+                        continue
+                    db_exec(conn, """
+                        INSERT INTO materias_primas (cliente_id, nome, sku, custo_unitario, estoque_atual, unidade, ativo)
+                        VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                    """, (
+                        cliente["id"],
+                        nome,
+                        str(row["SKU"]).strip() if pd.notna(row["SKU"]) else "",
+                        float(row["Custo Unitário"]) if pd.notna(row["Custo Unitário"]) else 0,
+                        float(row["Estoque Atual"]) if pd.notna(row["Estoque Atual"]) else 0,
+                        str(row["Unidade"]).strip() if pd.notna(row["Unidade"]) else "un"
+                    ))
+                    materias_criadas += 1
+                except Exception as e:
+                    print(f"Erro ao importar linha {idx} (Matérias-Primas): {e}")
+
+        receitas_vinculadas = 0
+        receitas_com_erro = []
+        if df_receita is not None:
+            colunas_receita = ["Nome do Produto", "Nome da Matéria-Prima", "Quantidade por Unidade"]
+            for col in colunas_receita:
+                if col not in df_receita.columns:
+                    raise HTTPException(status_code=400, detail=f"Coluna ausente na aba Receita: {col}")
+
+            # Agrupa por produto pra gravar a receita inteira de uma vez (mesma lógica do
+            # endpoint manual PUT /produtos/{id}/receita — substitui a receita anterior do produto)
+            itens_por_produto = {}
+            for idx, row in df_receita.iterrows():
+                nome_produto = str(row["Nome do Produto"]).strip()
+                nome_materia = str(row["Nome da Matéria-Prima"]).strip()
+                if not nome_produto or nome_produto.startswith("Exemplo"):
+                    continue
+                if not pd.notna(row["Quantidade por Unidade"]):
+                    continue
+                try:
+                    quantidade = float(row["Quantidade por Unidade"])
+                except (ValueError, TypeError):
+                    receitas_com_erro.append(f"linha {idx + 2}: quantidade inválida")
+                    continue
+
+                produto = buscar_produto_por_nome(conn, cliente["id"], nome_produto)
+                materia = buscar_materia_prima_por_nome(conn, cliente["id"], nome_materia)
+                if not produto:
+                    receitas_com_erro.append(f"linha {idx + 2}: produto '{nome_produto}' não encontrado")
+                    continue
+                if not materia:
+                    receitas_com_erro.append(f"linha {idx + 2}: matéria-prima '{nome_materia}' não encontrada")
+                    continue
+
+                itens_por_produto.setdefault(produto["id"], []).append(
+                    {"materia_prima_id": materia["id"], "quantidade_necessaria": quantidade}
+                )
+
+            for produto_id, itens in itens_por_produto.items():
+                db_exec(conn, "DELETE FROM receita_itens WHERE produto_id = %s", (produto_id,))
+                for item in itens:
+                    db_exec(conn, """
+                        INSERT INTO receita_itens (produto_id, materia_prima_id, quantidade_necessaria)
+                        VALUES (%s,%s,%s)
+                    """, (produto_id, item["materia_prima_id"], item["quantidade_necessaria"]))
+                    receitas_vinculadas += 1
+
+        resultado = {
+            "ok": True,
+            "produtos_criados": produtos_criados,
+            "materias_primas_criadas": materias_criadas,
+            "receitas_vinculadas": receitas_vinculadas,
+        }
+        if receitas_com_erro:
+            resultado["avisos"] = receitas_com_erro
+        return resultado
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao processar arquivo: {str(e)}")
 
