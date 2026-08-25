@@ -664,7 +664,8 @@ def calcular_resultado_calculadora(dados: dict) -> dict:
     volume_esperado = float(dados.get("calc_volume_esperado") or 0)
     margem = dados.get("calc_margem")
     margem = float(margem) if margem is not None else 30.0
-    if margem >= 100:
+    margem_ajustada = margem >= 100
+    if margem_ajustada:
         margem = 99.0  # evita divisão por zero/negativa — margem de 100%+ não faz sentido matemático aqui
 
     custo_fixo_rateado = (custo_fixo_mensal / volume_esperado) if volume_esperado > 0 else 0.0
@@ -677,10 +678,16 @@ def calcular_resultado_calculadora(dados: dict) -> dict:
         "custo_total_unitario": round(custo_total_unitario, 2),
         "preco_sugerido": round(preco_sugerido, 2),
         "margem": margem,
+        "margem_ajustada": margem_ajustada,
     }
 
 def texto_resultado_calculadora(dados: dict, resultado: dict) -> str:
     nome = dados.get("prod_nome", "produto")
+    aviso_margem = (
+        f"⚠️ A margem informada era 100% ou mais, o que não é matematicamente possível "
+        f"(o preço nunca cobriria o custo) — ajustei automaticamente para {fmt_num(resultado['margem'])}%.\n\n"
+        if resultado.get("margem_ajustada") else ""
+    )
     return (
         f"🧮 *Cálculo de preço — {nome}*\n"
         f"Custo variável (por unidade): R$ {resultado['custo_variavel']:.2f}\n"
@@ -688,6 +695,7 @@ def texto_resultado_calculadora(dados: dict, resultado: dict) -> str:
         f"Custo total por unidade: R$ {resultado['custo_total_unitario']:.2f}\n"
         f"Margem desejada: {fmt_num(resultado['margem'])}%\n"
         f"*Preço sugerido: R$ {resultado['preco_sugerido']:.2f}*\n\n"
+        f"{aviso_margem}"
         "⚠️ O custo fixo mensal e o volume esperado não ficam salvos — é só pra calcular o preço agora "
         "(a cada novo produto, esses valores são pedidos de novo).\n\n"
         "Confirma usar este custo e preço no cadastro? Responda SIM ou NÃO."
@@ -1466,6 +1474,10 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             resultado = dados.get("calc_resultado", {})
             dados["prod_custo"] = resultado.get("custo_total_unitario", 0)
             dados["prod_preco"] = resultado.get("preco_sugerido", 0)
+            # Se veio pelo caminho "custo variável manual" (sem ficha técnica), prod_quer_receita
+            # nunca foi marcado — sem isso, a etapa prod_estoque pergunta de novo "usa receita?".
+            if "prod_quer_receita" not in dados:
+                dados["prod_quer_receita"] = bool(dados.get("calc_receita_itens"))
             salvar_sessao(conn, numero_autorizado_id, "prod_estoque", dados)
             return "Qual o estoque inicial desse produto?"
         if texto_low in ("não", "nao", "n"):
