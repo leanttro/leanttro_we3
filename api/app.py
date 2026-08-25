@@ -109,7 +109,7 @@ AGENDA_MENU_TEXTO = (
 
 TEXTO_ESCOLHER_MODULO = (
     "👋 O que você quer fazer?\n"
-    "1️⃣ 📦 Estoque\n"
+    "1️⃣ 📦 Vendas & Estoque\n"
     "2️⃣ 📅 Agenda\n\n"
     "Responda com o número."
 )
