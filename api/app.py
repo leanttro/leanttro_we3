@@ -188,6 +188,7 @@ class MovimentacaoManualBody(BaseModel):
     tipo: str  # entrada | saida | venda | ajuste
     quantidade: float
     valor_unitario: Optional[float] = 0
+    cliente_negocio_id: Optional[int] = None  # vínculo opcional com clientes_negocio (só relevante p/ venda)
 
 class MateriaPrimaBody(BaseModel):
     nome: str
@@ -231,6 +232,11 @@ class OrcamentoBody(BaseModel):
     desconto_valor: Optional[float] = 0
     observacoes: Optional[str] = None
     nome_cliente: Optional[str] = None
+    cliente_negocio_id: Optional[int] = None  # vínculo opcional com clientes_negocio
+
+class ClienteNegocioBody(BaseModel):
+    nome: str
+    telefone: Optional[str] = None
 
 # ─────────────────────────────────────────
 #  HELPERS DE NEGÓCIO
@@ -334,22 +340,8 @@ def parse_selecao_multipla(texto: str, max_idx: int):
             indices.append(idx)
     return indices or None
 
-def avancar_fila_ou_confirmar(conn, numero_autorizado_id: int, dados: dict, tipo: str) -> str:
-    """Chamado depois que um item do carrinho (produto + quantidade [+ valor])
-    foi completado. Se ainda sobra produto na fila, pergunta a quantidade do
-    próximo; se não sobra mais nada, monta o resumo do carrinho inteiro pra
-    confirmação (SIM/NÃO)."""
-    fila = dados.get("fila_produtos_ids", [])
-    if fila:
-        proximo_id = fila.pop(0)
-        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (proximo_id,))
-        dados["fila_produtos_ids"] = fila
-        dados["produto_id"] = produto["id"]
-        dados["produto_nome"] = produto["nome"]
-        salvar_sessao(conn, numero_autorizado_id, f"{tipo}_quantidade", dados)
-        return f"Quantidade de *{produto['nome']}*?"
-
-    salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
+def montar_texto_confirmacao_carrinho(dados: dict, tipo: str) -> str:
+    """Monta o texto de confirmação (SIM/NÃO) do carrinho inteiro."""
     carrinho = dados.get("carrinho", [])
     linhas = []
     total_geral = 0.0
@@ -368,6 +360,29 @@ def avancar_fila_ou_confirmar(conn, numero_autorizado_id: int, dados: dict, tipo
     if tipo == "ajuste":
         return f"Confirma {acao}?\n{corpo}\n\nResponda SIM ou NÃO."
     return f"Confirma {acao}?\n{corpo}\n\nTotal: R$ {total_geral:.2f}\n\nResponda SIM ou NÃO."
+
+def avancar_fila_ou_confirmar(conn, numero_autorizado_id: int, dados: dict, tipo: str) -> str:
+    """Chamado depois que um item do carrinho (produto + quantidade [+ valor])
+    foi completado. Se ainda sobra produto na fila, pergunta a quantidade do
+    próximo; se não sobra mais nada, monta o resumo do carrinho inteiro pra
+    confirmação (SIM/NÃO) — exceto em vendas, onde antes passa pelo passo
+    opcional de identificar o cliente (TAREFA 2)."""
+    fila = dados.get("fila_produtos_ids", [])
+    if fila:
+        proximo_id = fila.pop(0)
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (proximo_id,))
+        dados["fila_produtos_ids"] = fila
+        dados["produto_id"] = produto["id"]
+        dados["produto_nome"] = produto["nome"]
+        salvar_sessao(conn, numero_autorizado_id, f"{tipo}_quantidade", dados)
+        return f"Quantidade de *{produto['nome']}*?"
+
+    if tipo == "venda":
+        salvar_sessao(conn, numero_autorizado_id, "venda_cliente", dados)
+        return "Quem é o cliente? Pode digitar o nome, telefone, ou 'pular'."
+
+    salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
+    return montar_texto_confirmacao_carrinho(dados, tipo)
 
 # ─────────────────────────────────────────
 #  ORÇAMENTO — helpers compartilhados (painel HTTP + bot WhatsApp)
@@ -441,13 +456,13 @@ def montar_texto_orcamento(cliente: dict, itens_detalhados: list, subtotal: floa
 
 def salvar_orcamento_db(conn, cliente_id: int, nome_cliente, itens_detalhados: list, subtotal: float,
                          ajuste_tipo, ajuste_calculado: float, total: float, texto_formatado: str,
-                         observacoes) -> dict:
+                         observacoes, cliente_negocio_id: Optional[int] = None) -> dict:
     return db_exec(conn, """
-        INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+        INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes, cliente_negocio_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
     """, (
         cliente_id, nome_cliente, json.dumps(itens_detalhados), subtotal,
-        ajuste_tipo, ajuste_calculado, total, texto_formatado, observacoes
+        ajuste_tipo, ajuste_calculado, total, texto_formatado, observacoes, cliente_negocio_id
     ))
 
 def parse_ajuste_preco_texto(texto: str, subtotal: float):
@@ -483,16 +498,16 @@ def parse_ajuste_preco_texto(texto: str, subtotal: float):
     except ValueError:
         return None
 
-def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, origem, mensagem_original=None):
+def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, origem, mensagem_original=None, cliente_negocio_id=None):
     quantidade = float(quantidade)
     valor_unitario = float(valor_unitario or 0)
     valor_total = round(quantidade * valor_unitario, 2)
 
     db_exec(conn, """
         INSERT INTO movimentacoes
-            (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    """, (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original))
+            (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original, cliente_negocio_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, valor_total, origem, mensagem_original, cliente_negocio_id))
 
     alertas = []
     if tipo == "entrada":
@@ -574,6 +589,87 @@ def baixar_materia_prima_por_receita(conn, cliente_id, produto_id, numero_autori
     return alertas
 
 # ─────────────────────────────────────────
+#  CLIENTES DO NEGÓCIO (clientes finais — TAREFA 2)
+# ─────────────────────────────────────────
+def buscar_ou_criar_cliente_negocio(conn, cliente_id: int, texto: str):
+    """Recebe o texto digitado no passo opcional 'Quem é o cliente?' (nome OU
+    telefone) e retorna o registro em clientes_negocio, criando se necessário.
+    Se parecer um telefone e já existir um cliente com esse telefone pra esse
+    cliente_id, reaproveita o registro existente. Retorna None se o texto for
+    vazio ou 'pular' — nesse caso o chamador simplesmente segue sem vincular."""
+    if not texto:
+        return None
+    texto = texto.strip()
+    if not texto or texto.lower() == "pular":
+        return None
+
+    digitos = re.sub(r"\D", "", texto)
+    if len(digitos) >= 8:
+        existente = db_one(conn, "SELECT * FROM clientes_negocio WHERE cliente_id = %s AND telefone = %s",
+                            (cliente_id, digitos))
+        if existente:
+            return existente
+        return db_exec(conn, """
+            INSERT INTO clientes_negocio (cliente_id, nome, telefone) VALUES (%s,%s,%s) RETURNING *
+        """, (cliente_id, texto, digitos))
+
+    existente = db_one(conn, """
+        SELECT * FROM clientes_negocio WHERE cliente_id = %s AND nome ILIKE %s ORDER BY id LIMIT 1
+    """, (cliente_id, texto))
+    if existente:
+        return existente
+    return db_exec(conn, """
+        INSERT INTO clientes_negocio (cliente_id, nome, telefone) VALUES (%s,%s,NULL) RETURNING *
+    """, (cliente_id, texto))
+
+# ─────────────────────────────────────────
+#  CALCULADORA DE CUSTO/PREÇO (TAREFA 1)
+# ─────────────────────────────────────────
+def calcular_resultado_calculadora(dados: dict) -> dict:
+    """Aplica as fórmulas da calculadora de preço em cima do que já foi
+    coletado em `dados` (via formulário passo-a-passo ou já extraído pela IA).
+    Não bate no banco — é só matemática em cima do dicionário de sessão."""
+    custo_variavel = float(dados.get("custo_variavel") or 0)
+    if not custo_variavel and dados.get("calc_receita_itens"):
+        custo_variavel = sum(
+            float(item["quantidade"]) * float(item.get("custo_unitario") or 0)
+            for item in dados["calc_receita_itens"]
+        )
+
+    custo_fixo_mensal = float(dados.get("calc_custo_fixo_mensal") or 0)
+    volume_esperado = float(dados.get("calc_volume_esperado") or 0)
+    margem = dados.get("calc_margem")
+    margem = float(margem) if margem is not None else 30.0
+    if margem >= 100:
+        margem = 99.0  # evita divisão por zero/negativa — margem de 100%+ não faz sentido matemático aqui
+
+    custo_fixo_rateado = (custo_fixo_mensal / volume_esperado) if volume_esperado > 0 else 0.0
+    custo_total_unitario = custo_variavel + custo_fixo_rateado
+    preco_sugerido = custo_total_unitario / (1 - margem / 100)
+
+    return {
+        "custo_variavel": round(custo_variavel, 2),
+        "custo_fixo_rateado": round(custo_fixo_rateado, 2),
+        "custo_total_unitario": round(custo_total_unitario, 2),
+        "preco_sugerido": round(preco_sugerido, 2),
+        "margem": margem,
+    }
+
+def texto_resultado_calculadora(dados: dict, resultado: dict) -> str:
+    nome = dados.get("prod_nome", "produto")
+    return (
+        f"🧮 *Cálculo de preço — {nome}*\n"
+        f"Custo variável (por unidade): R$ {resultado['custo_variavel']:.2f}\n"
+        f"Custo fixo rateado (por unidade): R$ {resultado['custo_fixo_rateado']:.2f}\n"
+        f"Custo total por unidade: R$ {resultado['custo_total_unitario']:.2f}\n"
+        f"Margem desejada: {fmt_num(resultado['margem'])}%\n"
+        f"*Preço sugerido: R$ {resultado['preco_sugerido']:.2f}*\n\n"
+        "⚠️ O custo fixo mensal e o volume esperado não ficam salvos — é só pra calcular o preço agora "
+        "(a cada novo produto, esses valores são pedidos de novo).\n\n"
+        "Confirma usar este custo e preço no cadastro? Responda SIM ou NÃO."
+    )
+
+# ─────────────────────────────────────────
 #  IA (GROQ) — extração estruturada
 # ─────────────────────────────────────────
 def get_groq_key(cliente: dict) -> str:
@@ -584,18 +680,44 @@ def get_groq_key(cliente: dict) -> str:
 PROMPT_EXTRACAO = """Você é um extrator de dados de estoque. O usuário vai descrever uma movimentação em linguagem natural (entrada de mercadoria, venda ou saída).
 
 Responda APENAS com um JSON válido, sem nenhum texto antes ou depois, no formato:
-{"tipo": "entrada|venda|saida", "produto": "nome do produto", "quantidade": numero, "valor_unitario": numero}
+{"tipo": "entrada|venda|saida", "produto": "nome do produto", "quantidade": numero, "valor_unitario": numero, "cliente": "nome ou telefone do cliente, se mencionado, senão null"}
 
+O campo "cliente" só é relevante quando "tipo" é "venda" e a mensagem menciona claramente quem comprou
+(ex: "vendi 3 bolos pra Maria", "venda pro João, telefone 11999998888"). Se não houver menção a um cliente, use null.
 Se não conseguir identificar algum campo com confiança, use null nesse campo.
 Se a mensagem não for sobre estoque/venda, responda: {"tipo": null}
 """
 
-async def chamar_groq_json(texto_usuario: str, groq_key: str) -> Optional[dict]:
+PROMPT_EXTRACAO_PRODUTO_CALC = """Você é um extrator de dados para cadastro de produto, incluindo uma calculadora
+de custo/preço, num sistema de estoque via WhatsApp. O usuário vai descrever, em linguagem natural, que quer
+cadastrar um novo produto — às vezes já sabendo o custo/preço, às vezes pedindo ajuda pra calcular a partir de
+custo fixo do negócio, volume de vendas esperado e margem de lucro desejada.
+
+Responda APENAS com um JSON válido, sem nenhum texto antes ou depois, no formato:
+{
+  "tipo": "cadastro_produto",
+  "nome": "nome do produto ou null",
+  "unidade": "un/kg/l/etc ou null",
+  "custo_unitario": numero ou null,
+  "preco_venda": numero ou null,
+  "quer_calculadora": true/false/null,
+  "custo_variavel_unitario": numero ou null,
+  "custo_fixo_mensal": numero ou null,
+  "volume_esperado_mensal": numero ou null,
+  "margem_percentual": numero ou null
+}
+
+"quer_calculadora" deve ser true quando o usuário pede ajuda pra calcular o preço (menciona aluguel, luz, custo fixo,
+quantas unidades espera vender, margem de lucro etc.) e não informou custo_unitario/preco_venda diretamente.
+Se a mensagem não for sobre cadastrar um produto, responda: {"tipo": null}
+"""
+
+async def chamar_groq_json(texto_usuario: str, groq_key: str, prompt: str = PROMPT_EXTRACAO) -> Optional[dict]:
     if not groq_key:
         print("⚠️ GROQ: nenhuma chave configurada (env var vazia)")
         return None
     messages = [
-        {"role": "system", "content": PROMPT_EXTRACAO},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": texto_usuario}
     ]
     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
@@ -719,6 +841,13 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if extraido and extraido.get("tipo") in ("entrada", "venda", "saida"):
                 return await preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto)
 
+            # não era movimentação — tenta reconhecer um cadastro de produto (com/sem calculadora)
+            extraido_produto = await chamar_groq_json(texto, get_groq_key(cliente), prompt=PROMPT_EXTRACAO_PRODUTO_CALC)
+            if extraido_produto and extraido_produto.get("tipo") == "cadastro_produto":
+                resposta_ia = await iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extraido_produto)
+                if resposta_ia:
+                    return resposta_ia
+
         return "Olá, bem-vindo(a) ao Painel do Seu Negócio!\n\n" + resposta_menu()
 
     # ── ETAPA: escolhendo o(s) produto(s) da lista numerada ──
@@ -804,6 +933,19 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         })
         return avancar_fila_ou_confirmar(conn, numero_autorizado_id, dados, tipo)
 
+    # ── ETAPA: venda — identificar o cliente (opcional, TAREFA 2) ──
+    if etapa == "venda_cliente":
+        if texto_low != "pular":
+            cliente_negocio = buscar_ou_criar_cliente_negocio(conn, cliente["id"], texto)
+            if cliente_negocio:
+                dados["cliente_negocio_id"] = cliente_negocio["id"]
+                dados["cliente_negocio_nome"] = cliente_negocio["nome"]
+        salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
+        texto_confirmacao = montar_texto_confirmacao_carrinho(dados, "venda")
+        if dados.get("cliente_negocio_nome"):
+            texto_confirmacao = f"Cliente: {dados['cliente_negocio_nome']}\n" + texto_confirmacao
+        return texto_confirmacao
+
     # ── ETAPA: cadastro de matéria-prima (opção 6) ──
     if etapa == "mp_nome":
         dados["mp_nome"] = texto.strip()
@@ -878,8 +1020,160 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     if etapa == "prod_unidade":
         dados["prod_unidade"] = texto.strip() if texto_low != "pular" else "un"
-        salvar_sessao(conn, numero_autorizado_id, "prod_custo", dados)
-        return "Qual o custo unitário (R$)? — digite 0 se ainda não souber"
+        salvar_sessao(conn, numero_autorizado_id, "prod_custo_modo", dados)
+        return (
+            "Você já sabe o custo e o preço de venda, ou quer ajuda pra calcular?\n"
+            "1 - Já sei\n"
+            "2 - Quer ajuda pra calcular"
+        )
+
+    # ── ETAPA: escolhe entre informar custo/preço direto ou usar a calculadora (TAREFA 1) ──
+    if etapa == "prod_custo_modo":
+        if texto_low in ("1", "ja sei", "já sei", "sei"):
+            salvar_sessao(conn, numero_autorizado_id, "prod_custo", dados)
+            return "Qual o custo unitário (R$)? — digite 0 se ainda não souber"
+        if texto_low in ("2", "quero ajuda", "quer ajuda", "ajuda", "calcular", "não sei", "nao sei"):
+            salvar_sessao(conn, numero_autorizado_id, "calc_pergunta_receita", dados)
+            return (
+                "Vamos calcular! Esse produto vai ter uma ficha técnica (receita com matérias-primas)? "
+                "Se sim, calculo o custo variável automaticamente a partir dela.\n"
+                "Se não, você digita o custo variável por unidade direto.\n\nResponda SIM ou NÃO."
+            )
+        return "Responda 1 (já sei o custo/preço) ou 2 (quero ajuda pra calcular)."
+
+    # ── ETAPA: calculadora — quer montar a ficha técnica agora? ──
+    if etapa == "calc_pergunta_receita":
+        if texto_low in ("sim", "s"):
+            materias = listar_materias_primas_cliente(conn, cliente["id"])
+            if not materias:
+                dados["calc_receita_itens"] = []
+                salvar_sessao(conn, numero_autorizado_id, "calc_custo_variavel_manual", dados)
+                return (
+                    "Você ainda não tem matéria-prima cadastrada, então não dá pra montar a ficha técnica agora.\n"
+                    "Qual o custo variável por unidade (R$)? (ingredientes, embalagem etc. — ou 0 se não tiver)"
+                )
+            dados["calc_receita_itens"] = []
+            dados["calc_materias_ids"] = [m["id"] for m in materias]
+            salvar_sessao(conn, numero_autorizado_id, "calc_receita_item_escolha", dados)
+            return montar_lista_numerada(
+                materias, "Qual matéria-prima entra na receita?",
+                rodape="Responda com o número, ou digite PRONTO quando terminar."
+            )
+        if texto_low in ("não", "nao", "n"):
+            dados["calc_receita_itens"] = []
+            salvar_sessao(conn, numero_autorizado_id, "calc_custo_variavel_manual", dados)
+            return "Qual o custo variável por unidade (R$)? (ingredientes, embalagem etc. — ou 0 se não tiver)"
+        return "Responda SIM ou NÃO."
+
+    # ── ETAPA: calculadora — montando a ficha técnica ──
+    if etapa == "calc_receita_item_escolha":
+        if texto_low == "pronto":
+            dados["prod_quer_receita"] = bool(dados.get("calc_receita_itens"))
+            if dados["prod_quer_receita"]:
+                dados["receita_itens"] = dados["calc_receita_itens"]
+                dados["calc_receita_pronta"] = True
+            salvar_sessao(conn, numero_autorizado_id, "calc_custo_fixo", dados)
+            return (
+                "Qual o custo fixo mensal total do negócio (aluguel, luz, embalagem, mão de obra somados)?\n"
+                "(esses valores não ficam salvos, é só pra calcular o preço agora)"
+            )
+        materias_ids = dados.get("calc_materias_ids", [])
+        try:
+            idx = int(texto.strip())
+            assert 1 <= idx <= len(materias_ids)
+        except (ValueError, AssertionError):
+            return f"Manda só o número da matéria-prima (1 a {len(materias_ids)}), ou PRONTO para terminar."
+        materia = db_one(conn, "SELECT * FROM materias_primas WHERE id = %s", (materias_ids[idx - 1],))
+        if not materia:
+            return "Essa matéria-prima não existe mais. Escolha outro número ou digite PRONTO."
+        dados["calc_item_atual"] = {
+            "id": materia["id"], "nome": materia["nome"], "unidade": materia["unidade"],
+            "custo_unitario": float(materia["custo_unitario"] or 0),
+        }
+        salvar_sessao(conn, numero_autorizado_id, "calc_receita_item_qtd", dados)
+        return f"Quantos {materia['unidade']} de *{materia['nome']}* vão em 1 unidade do produto?"
+
+    if etapa == "calc_receita_item_qtd":
+        try:
+            quantidade = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número da quantidade, por favor."
+        item = dados["calc_item_atual"]
+        dados.setdefault("calc_receita_itens", []).append({
+            "materia_prima_id": item["id"], "nome": item["nome"], "unidade": item["unidade"],
+            "quantidade": quantidade, "custo_unitario": item["custo_unitario"],
+        })
+        dados.pop("calc_item_atual", None)
+        materias = listar_materias_primas_cliente(conn, cliente["id"])
+        dados["calc_materias_ids"] = [m["id"] for m in materias]
+        salvar_sessao(conn, numero_autorizado_id, "calc_receita_item_escolha", dados)
+        return montar_lista_numerada(
+            materias, "Adicionado! Mais alguma matéria-prima?",
+            rodape="Responda com o número, ou digite PRONTO para terminar."
+        )
+
+    # ── ETAPA: calculadora — custo variável informado direto (sem ficha técnica) ──
+    if etapa == "calc_custo_variavel_manual":
+        try:
+            valor = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do custo variável, por favor."
+        dados["custo_variavel"] = valor
+        salvar_sessao(conn, numero_autorizado_id, "calc_custo_fixo", dados)
+        return (
+            "Qual o custo fixo mensal total do negócio (aluguel, luz, embalagem, mão de obra somados)?\n"
+            "(esses valores não ficam salvos, é só pra calcular o preço agora)"
+        )
+
+    # ── ETAPA: calculadora — custo fixo mensal ──
+    if etapa == "calc_custo_fixo":
+        try:
+            valor = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do custo fixo mensal, por favor."
+        dados["calc_custo_fixo_mensal"] = valor
+        salvar_sessao(conn, numero_autorizado_id, "calc_volume", dados)
+        return "Quantas unidades desse produto você espera vender por mês?"
+
+    # ── ETAPA: calculadora — volume esperado de vendas ──
+    if etapa == "calc_volume":
+        try:
+            valor = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número do volume esperado, por favor."
+        if valor <= 0:
+            return "O volume esperado precisa ser maior que zero (pra dar pra ratear o custo fixo)."
+        dados["calc_volume_esperado"] = valor
+        salvar_sessao(conn, numero_autorizado_id, "calc_margem", dados)
+        return "Qual a margem de lucro desejada em %? (sugestão: 30% — digite PULAR para usar 30%)"
+
+    # ── ETAPA: calculadora — margem desejada e cálculo final ──
+    if etapa == "calc_margem":
+        if texto_low == "pular":
+            margem = 30.0
+        else:
+            try:
+                margem = float(texto.replace(",", "."))
+            except ValueError:
+                return "Manda só o número da margem (%), ou PULAR para usar 30%."
+        dados["calc_margem"] = margem
+        resultado = calcular_resultado_calculadora(dados)
+        dados["calc_resultado"] = resultado
+        salvar_sessao(conn, numero_autorizado_id, "calc_confirmar", dados)
+        return texto_resultado_calculadora(dados, resultado)
+
+    # ── ETAPA: calculadora — confirma usar o custo/preço calculado ──
+    if etapa == "calc_confirmar":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            resultado = dados.get("calc_resultado", {})
+            dados["prod_custo"] = resultado.get("custo_total_unitario", 0)
+            dados["prod_preco"] = resultado.get("preco_sugerido", 0)
+            salvar_sessao(conn, numero_autorizado_id, "prod_estoque", dados)
+            return "Qual o estoque inicial desse produto?"
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Cadastro cancelado.\n\n" + resposta_menu()
+        return "Responda SIM ou NÃO."
 
     if etapa == "prod_custo":
         try:
@@ -905,6 +1199,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         except ValueError:
             return "Manda só o número do estoque, por favor."
         dados["prod_estoque"] = estoque
+
+        # Se veio da calculadora (ou da IA), "usa receita?" já foi respondido — pula a pergunta.
+        if "prod_quer_receita" in dados:
+            salvar_sessao(conn, numero_autorizado_id, "produto_aguardando_confirmacao", dados)
+            return (
+                f"Confirma o cadastro?\n"
+                f"*{dados['prod_nome']}* | {dados['prod_unidade']} | custo R$ {dados['prod_custo']:.2f} | "
+                f"venda R$ {dados['prod_preco']:.2f} | estoque inicial {fmt_num(dados['prod_estoque'])}"
+                f"\n\nResponda SIM ou NÃO."
+            )
+
         salvar_sessao(conn, numero_autorizado_id, "prod_quer_receita", dados)
         return (
             "Esse produto usa alguma matéria-prima na receita (ex: farinha, embalagem)? "
@@ -941,6 +1246,18 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if not dados.get("prod_quer_receita"):
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
                 return "✅ Produto cadastrado com sucesso!\n\n" + resposta_menu()
+
+            # TAREFA 1 — a receita já foi montada durante a calculadora: salva direto, sem perguntar de novo.
+            if dados.get("calc_receita_pronta") and dados.get("receita_itens"):
+                for item in dados["receita_itens"]:
+                    db_exec(conn, """
+                        INSERT INTO receita_itens (produto_id, materia_prima_id, quantidade_necessaria)
+                        VALUES (%s,%s,%s)
+                    """, (produto_novo["id"], item["materia_prima_id"], item["quantidade"]))
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("✅ Produto cadastrado com receita e preço já calculados!\n\n"
+                        "A partir de agora, vender esse produto já desconta a matéria-prima automaticamente.\n\n"
+                        ) + resposta_menu()
 
             # Quis vincular receita — encadeia direto no mesmo fluxo da opção 7,
             # já com o produto recém-criado.
@@ -1061,7 +1378,8 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                     _, alertas_item = aplicar_movimentacao(
                         conn, cliente["id"], item["produto_id"], numero_autorizado_id,
                         tipo, item["quantidade"], item.get("valor_unitario", 0),
-                        origem="formulario", mensagem_original=texto
+                        origem="formulario", mensagem_original=texto,
+                        cliente_negocio_id=dados.get("cliente_negocio_id")
                     )
                     todos_alertas.extend(alertas_item)
             else:
@@ -1069,7 +1387,8 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
                 _, alertas_item = aplicar_movimentacao(
                     conn, cliente["id"], dados["produto_id"], numero_autorizado_id,
                     tipo, dados["quantidade"], dados.get("valor_unitario", 0),
-                    origem="formulario", mensagem_original=texto
+                    origem="formulario", mensagem_original=texto,
+                    cliente_negocio_id=dados.get("cliente_negocio_id")
                 )
                 todos_alertas.extend(alertas_item)
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
@@ -1172,6 +1491,11 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
     # ── ETAPA: orçamento — nome do cliente (última pergunta) e geração do texto final ──
     if etapa == "orc_nome_cliente":
         nome_cliente = None if texto_low == "pular" else texto.strip()
+        cliente_negocio_id = None
+        if nome_cliente:
+            cliente_negocio = buscar_ou_criar_cliente_negocio(conn, cliente["id"], nome_cliente)
+            if cliente_negocio:
+                cliente_negocio_id = cliente_negocio["id"]
         try:
             itens_detalhados, subtotal = calcular_itens_orcamento(conn, cliente["id"], dados.get("orc_itens", []))
         except ValueError as e:
@@ -1186,7 +1510,8 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             ajuste_valor_informado, total, observacoes=None, nome_cliente=nome_cliente
         )
         salvar_orcamento_db(conn, cliente["id"], nome_cliente, itens_detalhados, subtotal,
-                             ajuste_tipo, ajuste_calculado, total, texto_formatado, None)
+                             ajuste_tipo, ajuste_calculado, total, texto_formatado, None,
+                             cliente_negocio_id=cliente_negocio_id)
         salvar_sessao(conn, numero_autorizado_id, "menu", {})
         return (
             "✅ Orçamento pronto!\n\n"
@@ -1217,12 +1542,79 @@ async def preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido,
         "tipo": tipo, "produto_id": produto["id"], "produto_nome": produto["nome"],
         "quantidade": float(quantidade), "valor_unitario": float(valor_unitario or 0),
     }
+
+    # TAREFA 2 — se a mensagem livre já mencionou o cliente numa venda, vincula sem perguntar de novo
+    cliente_texto = extraido.get("cliente")
+    if tipo == "venda" and cliente_texto:
+        cliente_negocio = buscar_ou_criar_cliente_negocio(conn, cliente["id"], cliente_texto)
+        if cliente_negocio:
+            dados["cliente_negocio_id"] = cliente_negocio["id"]
+            dados["cliente_negocio_nome"] = cliente_negocio["nome"]
+
     salvar_sessao(conn, numero_autorizado_id, "confirmando", dados)
     total = round(dados["quantidade"] * dados["valor_unitario"], 2)
     acao = {"entrada": "Entrada de", "venda": "Venda de", "saida": "Saída de"}[tipo]
-    return (
+    resposta = (
         f"Confirma?\n{acao} {fmt_num(dados['quantidade'])} × *{produto['nome']}* "
         f"a R$ {dados['valor_unitario']:.2f} (total R$ {total:.2f})\n\nResponda SIM ou NÃO."
+    )
+    if dados.get("cliente_negocio_nome"):
+        resposta = f"Cliente: {dados['cliente_negocio_nome']}\n" + resposta
+    return resposta
+
+async def iniciar_cadastro_produto_ia(conn, cliente, numero_autorizado_id, extraido) -> Optional[str]:
+    """TAREFA 1 — modo IA: dispara o cadastro de produto (com ou sem a calculadora)
+    a partir de uma extração livre. Preenche o que conseguiu identificar e entra
+    na etapa seguinte da MESMA máquina de estados usada pelo formulário, pedindo
+    só o que ainda falta. Retorna None se não achou nome do produto (nesse caso o
+    chamador simplesmente ignora e segue o fluxo normal)."""
+    nome = extraido.get("nome")
+    if not nome or not nome.strip():
+        return None
+
+    dados = {"prod_nome": nome.strip(), "prod_unidade": extraido.get("unidade") or "un"}
+
+    custo_direto = extraido.get("custo_unitario")
+    preco_direto = extraido.get("preco_venda")
+    quer_calc = extraido.get("quer_calculadora")
+    tem_dados_calc = any(
+        extraido.get(k) is not None
+        for k in ("custo_variavel_unitario", "custo_fixo_mensal", "volume_esperado_mensal", "margem_percentual")
+    )
+
+    if quer_calc or (custo_direto is None and preco_direto is None and tem_dados_calc):
+        dados["custo_variavel"] = float(extraido.get("custo_variavel_unitario") or 0)
+        dados["prod_quer_receita"] = False  # modo IA não monta ficha técnica na hora, só calcula
+        if extraido.get("custo_fixo_mensal") is not None:
+            dados["calc_custo_fixo_mensal"] = float(extraido["custo_fixo_mensal"])
+        if extraido.get("volume_esperado_mensal") is not None:
+            dados["calc_volume_esperado"] = float(extraido["volume_esperado_mensal"])
+        dados["calc_margem"] = float(extraido["margem_percentual"]) if extraido.get("margem_percentual") is not None else 30.0
+
+        if "calc_custo_fixo_mensal" not in dados:
+            salvar_sessao(conn, numero_autorizado_id, "calc_custo_fixo", dados)
+            return (
+                f"Beleza, vamos calcular o preço de *{dados['prod_nome']}*!\n"
+                "Qual o custo fixo mensal total do negócio (aluguel, luz, embalagem, mão de obra somados)?\n"
+                "(esses valores não ficam salvos, é só pra calcular o preço agora)"
+            )
+        if "calc_volume_esperado" not in dados:
+            salvar_sessao(conn, numero_autorizado_id, "calc_volume", dados)
+            return f"Quantas unidades de *{dados['prod_nome']}* você espera vender por mês?"
+
+        resultado = calcular_resultado_calculadora(dados)
+        dados["calc_resultado"] = resultado
+        salvar_sessao(conn, numero_autorizado_id, "calc_confirmar", dados)
+        return texto_resultado_calculadora(dados, resultado)
+
+    # modo direto — já tem (ou não) custo/preço; segue o cadastro pedindo só o que falta
+    dados["prod_custo"] = float(custo_direto or 0)
+    dados["prod_preco"] = float(preco_direto or 0)
+    salvar_sessao(conn, numero_autorizado_id, "prod_estoque", dados)
+    return (
+        f"Beleza! Vou cadastrar *{dados['prod_nome']}* "
+        f"(custo R$ {dados['prod_custo']:.2f}, venda R$ {dados['prod_preco']:.2f}).\n"
+        "Qual o estoque inicial desse produto?"
     )
 
 def gerar_visao_geral(conn, cliente_id: int) -> str:
@@ -1436,6 +1828,36 @@ def criar_tabelas_orcamentos():
     finally:
         conn.close()
 
+def criar_tabela_clientes_negocio():
+    """Cria a tabela clientes_negocio (TAREFA 2) e as colunas opcionais
+    cliente_negocio_id em orcamentos/movimentacoes, SE ainda não existirem.
+    Mesmo padrão 'self-healing' das outras tabelas novas — o migration.sql
+    também cobre isso pra quem preferir rodar a migração manualmente."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS clientes_negocio (
+                id          SERIAL PRIMARY KEY,
+                cliente_id  INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                nome        TEXT NOT NULL,
+                telefone    TEXT,
+                criado_em   TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_negocio_cliente_telefone
+            ON clientes_negocio (cliente_id, telefone) WHERE telefone IS NOT NULL;
+        """)
+        cur.execute("ALTER TABLE orcamentos ADD COLUMN IF NOT EXISTS cliente_negocio_id INTEGER NULL REFERENCES clientes_negocio(id);")
+        cur.execute("ALTER TABLE movimentacoes ADD COLUMN IF NOT EXISTS cliente_negocio_id INTEGER NULL REFERENCES clientes_negocio(id);")
+        conn.commit()
+        print("✅ Tabela clientes_negocio e colunas relacionadas: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela clientes_negocio: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -1445,6 +1867,7 @@ async def lifespan(app: FastAPI):
     criar_tabelas_resumo_automatico()
     criar_tabelas_agendamentos()
     criar_tabelas_orcamentos()
+    criar_tabela_clientes_negocio()
     
     # 2️⃣ Testar conexão com banco
     try:
@@ -1773,8 +2196,51 @@ def criar_movimentacao_manual(body: MovimentacaoManualBody, cliente=Depends(get_
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
     _, alertas = aplicar_movimentacao(conn, cliente["id"], body.produto_id, None, body.tipo, body.quantidade,
-                                       body.valor_unitario, origem="manual_admin")
+                                       body.valor_unitario, origem="manual_admin",
+                                       cliente_negocio_id=body.cliente_negocio_id)
     return {"ok": True, "alertas": alertas}
+
+# ═════════════════════════════════════════
+#  CLIENTES DO NEGÓCIO (painel do cliente) — TAREFA 2
+# ═════════════════════════════════════════
+@app.get("/clientes-negocio")
+def listar_clientes_negocio(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    return db_all(conn, "SELECT * FROM clientes_negocio WHERE cliente_id = %s ORDER BY nome",
+                  (cliente["id"],))
+
+@app.post("/clientes-negocio")
+def criar_cliente_negocio(body: ClienteNegocioBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    telefone = re.sub(r"\D", "", body.telefone) if body.telefone else None
+    if telefone:
+        existente = db_one(conn, "SELECT * FROM clientes_negocio WHERE cliente_id = %s AND telefone = %s",
+                            (cliente["id"], telefone))
+        if existente:
+            raise HTTPException(status_code=400, detail="Já existe um cliente com esse telefone")
+    return db_exec(conn, """
+        INSERT INTO clientes_negocio (cliente_id, nome, telefone) VALUES (%s,%s,%s) RETURNING *
+    """, (cliente["id"], body.nome, telefone))
+
+@app.get("/clientes-negocio/{cliente_negocio_id}/historico")
+def historico_cliente_negocio(cliente_negocio_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Retorna todos os orçamentos e vendas vinculados a esse cliente, ordenados por data."""
+    cliente_negocio = db_one(conn, "SELECT * FROM clientes_negocio WHERE id = %s AND cliente_id = %s",
+                              (cliente_negocio_id, cliente["id"]))
+    if not cliente_negocio:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    orcamentos = db_all(conn, """
+        SELECT id, 'orcamento' AS tipo_registro, nome_cliente, itens, subtotal, total, criado_em
+        FROM orcamentos WHERE cliente_id = %s AND cliente_negocio_id = %s
+    """, (cliente["id"], cliente_negocio_id))
+    vendas = db_all(conn, """
+        SELECT m.id, 'venda' AS tipo_registro, p.nome AS produto_nome, m.quantidade,
+               m.valor_unitario, m.valor_total, m.criado_em
+        FROM movimentacoes m JOIN produtos p ON p.id = m.produto_id
+        WHERE m.cliente_id = %s AND m.cliente_negocio_id = %s AND m.tipo = 'venda'
+    """, (cliente["id"], cliente_negocio_id))
+
+    historico = sorted(orcamentos + vendas, key=lambda r: r["criado_em"], reverse=True)
+    return {"cliente": cliente_negocio, "historico": historico}
 
 @app.get("/dashboard/resumo")
 def dashboard_resumo(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
@@ -2008,7 +2474,8 @@ def criar_orcamento(body: OrcamentoBody, cliente=Depends(get_current_cliente), c
     )
 
     registro = salvar_orcamento_db(conn, cliente["id"], body.nome_cliente, itens_detalhados, subtotal,
-                                    ajuste_tipo, ajuste_calculado, total, texto_formatado, body.observacoes)
+                                    ajuste_tipo, ajuste_calculado, total, texto_formatado, body.observacoes,
+                                    cliente_negocio_id=body.cliente_negocio_id)
     return registro
 
 @app.get("/orcamentos")
