@@ -64,9 +64,27 @@
         .btn-danger:hover {
             background: rgba(255,255,255,0.3);
         }
+
+        .btn-secondary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5568d3;
+        }
+
+        .btn-success {
+            background: #51cf66;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #40c057;
+        }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 30px 20px;
         }
@@ -139,6 +157,9 @@
             color: #333;
             margin-bottom: 20px;
             font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         
         .table-container {
@@ -146,11 +167,12 @@
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
         }
         
         .table-header {
             display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
             gap: 15px;
             padding: 15px 20px;
             background: #f8f9fa;
@@ -164,7 +186,7 @@
         
         .table-row {
             display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
             gap: 15px;
             padding: 15px 20px;
             border-bottom: 1px solid #f0f0f0;
@@ -177,6 +199,25 @@
         
         .table-row:hover {
             background: #f9f9f9;
+        }
+
+        .editable-cell {
+            cursor: pointer;
+            padding: 5px 8px;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .editable-cell:hover {
+            background: #e8eef7;
+        }
+
+        .editable-cell input {
+            width: 100%;
+            padding: 5px 8px;
+            border: 1px solid #667eea;
+            border-radius: 4px;
+            font-size: 14px;
         }
         
         .badge {
@@ -202,6 +243,7 @@
             gap: 15px;
             margin-bottom: 20px;
             flex-wrap: wrap;
+            align-items: center;
         }
         
         .filters input,
@@ -251,320 +293,348 @@
             padding: 30px;
             max-width: 500px;
             width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
         }
         
-        .modal-content h2 {
+        .modal-header {
+            font-size: 20px;
+            font-weight: 600;
             margin-bottom: 20px;
             color: #333;
         }
         
-        .form-group {
+        .modal-body {
             margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
         }
         
         .form-group label {
             display: block;
             margin-bottom: 8px;
+            font-weight: 500;
             color: #333;
-            font-weight: 600;
-            font-size: 14px;
         }
         
         .form-group input,
-        .form-group select {
+        .form-group select,
+        .form-group textarea {
             width: 100%;
             padding: 10px;
             border: 1px solid #e0e0e0;
             border-radius: 6px;
             font-size: 14px;
+            font-family: inherit;
+        }
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
         }
         
         .form-group input:focus,
-        .form-group select:focus {
+        .form-group select:focus,
+        .form-group textarea:focus {
             outline: none;
             border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
         }
         
-        .modal-actions {
+        .modal-footer {
             display: flex;
             gap: 10px;
             justify-content: flex-end;
-            margin-top: 25px;
         }
         
-        .btn-secondary {
-            background: #e0e0e0;
+        .tabs {
+            display: flex;
+            gap: 20px;
+            border-bottom: 2px solid #e0e0e0;
+            margin-bottom: 30px;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            padding: 10px 0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            color: #999;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .agendamento-card {
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agendamento-info {
+            flex: 1;
+        }
+
+        .agendamento-info strong {
+            display: block;
             color: #333;
+            margin-bottom: 5px;
         }
-        
-        .btn-secondary:hover {
-            background: #d0d0d0;
+
+        .agendamento-info small {
+            color: #999;
         }
-        
-        @media (max-width: 768px) {
-            .grid-3 {
-                grid-template-columns: 1fr;
-            }
-            
-            .grid-2 {
-                grid-template-columns: 1fr;
-            }
-            
-            .table-header,
-            .table-row {
-                grid-template-columns: 1fr;
-            }
-            
-            .topbar {
-                flex-direction: column;
-                gap: 15px;
-            }
+
+        .agendamento-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        #loading {
+            text-align: center;
+            padding: 20px;
+            color: #999;
         }
     </style>
 </head>
 <body>
     <div class="topbar">
-        <h1>📦 Estoque WPP</h1>
+        <h1>📦 Estoque WPP — Dashboard</h1>
         <div class="topbar-actions">
-            <button class="btn btn-primary" onclick="abrirModalProduto()">+ Novo Produto</button>
-            <button class="btn btn-primary" onclick="abrirModalMateriaPrima()">+ Nova Matéria-Prima</button>
-            <button class="btn btn-danger" onclick="logout()">Sair</button>
+            <button class="btn btn-primary" onclick="logout()">Sair</button>
         </div>
     </div>
     
     <div class="container">
-        <!-- RESUMO CARDS -->
+        <!-- CARDS RESUMO -->
         <div class="grid-3">
             <div class="card">
-                <h2>Produtos Ativos</h2>
+                <h2>Total de Produtos</h2>
                 <div class="value" id="totalProdutos">0</div>
-                <div class="subtext">cadastrados no sistema</div>
             </div>
-            
-            <div class="card success">
-                <h2>Valor Total em Estoque</h2>
+            <div class="card">
+                <h2>Valor em Estoque</h2>
                 <div class="value" id="valorEstoque">R$ 0</div>
-                <div class="subtext">custo total do inventário</div>
             </div>
-            
             <div class="card warning">
-                <h2>Itens com Baixo Estoque</h2>
+                <h2>Itens com Estoque Baixo</h2>
                 <div class="value" id="itensBaixos">0</div>
-                <div class="subtext">com quantidade crítica</div>
-            </div>
-        </div>
-        
-        <!-- ESTOQUE -->
-        <h3 class="section-title">📊 Estoque</h3>
-        <div class="card">
-            <div class="filters">
-                <input type="text" id="filtroNome" placeholder="🔍 Filtrar por nome..." onkeyup="filtrarProdutos()">
-                <select id="filtroUnidade" onchange="filtrarProdutos()">
-                    <option value="">Todas as unidades</option>
-                    <option value="un">Unidade</option>
-                    <option value="kg">Kg</option>
-                    <option value="l">Litro</option>
-                    <option value="cx">Caixa</option>
-                </select>
-            </div>
-            
-            <div class="table-container">
-                <div class="table-header" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;">
-                    <div>Produto</div>
-                    <div>SKU</div>
-                    <div>Estoque</div>
-                    <div>Custo Unit.</div>
-                    <div>Preço Venda</div>
-                    <div>Ações</div>
-                </div>
-                <div id="tabelaProdutos"></div>
             </div>
         </div>
 
-        <!-- MATÉRIAS-PRIMAS -->
-        <h3 class="section-title" style="margin-top: 40px;">🧪 Matérias-Primas</h3>
-        <div class="card">
-            <div class="filters">
-                <input type="text" id="filtroNomeMP" placeholder="🔍 Filtrar por nome..." onkeyup="filtrarMateriasPrimas()">
-            </div>
-
-            <div class="table-container">
-                <div class="table-header" style="grid-template-columns: 2fr 1fr 1fr 1fr;">
-                    <div>Matéria-Prima</div>
-                    <div>SKU</div>
-                    <div>Estoque</div>
-                    <div>Custo Unit.</div>
-                </div>
-                <div id="tabelaMateriasPrimas"></div>
-            </div>
+        <!-- ABAS -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="abrirAba('produtos')">📦 Produtos</button>
+            <button class="tab-btn" onclick="abrirAba('agendamentos')">📅 Agendamentos</button>
+            <button class="tab-btn" onclick="abrirAba('materias')">🧪 Matérias-Primas</button>
         </div>
-        
-        <!-- HISTÓRICO -->
-        <h3 class="section-title" style="margin-top: 40px;">📜 Histórico de Movimentações</h3>
-        <div class="card">
-            <div class="filters">
-                <select id="filtroTipo" onchange="filtrarMovimentacoes()">
-                    <option value="">Todos os tipos</option>
-                    <option value="entrada">Entrada</option>
-                    <option value="saida">Saída</option>
-                    <option value="venda">Venda</option>
-                    <option value="ajuste">Ajuste</option>
-                </select>
-                <input type="date" id="dataInicio" onchange="filtrarMovimentacoes()">
-                <input type="date" id="dataFim" onchange="filtrarMovimentacoes()">
+
+        <!-- ABA PRODUTOS -->
+        <div id="tab-produtos" class="tab-content active">
+            <div class="section-title">
+                Produtos
                 <div class="export-buttons">
-                    <button class="btn btn-primary btn-small" onclick="exportarCSV()">📥 CSV</button>
-                    <button class="btn btn-primary btn-small" onclick="exportarExcel()">📥 Excel</button>
+                    <button class="btn btn-secondary btn-small" onclick="abrirModalProduto()">➕ Novo Produto</button>
+                    <button class="btn btn-secondary btn-small" onclick="downloadTemplateExcel()">📥 Baixar Template</button>
+                    <button class="btn btn-secondary btn-small" onclick="document.getElementById('fileImportProdutos').click()">📤 Importar Excel</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarCSV()">📊 CSV</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarExcel()">📈 Excel</button>
+                    <input type="file" id="fileImportProdutos" style="display:none" accept=".xlsx,.xls" onchange="importarExcel()">
                 </div>
             </div>
             
-            <div class="table-container" style="margin-top: 15px;">
+            <div class="table-container">
                 <div class="table-header">
                     <div>Produto</div>
-                    <div>Tipo</div>
-                    <div>Qtd</div>
-                    <div>Valor Unit.</div>
-                    <div>Data</div>
+                    <div>SKU</div>
+                    <div>Custo</div>
+                    <div>Venda</div>
+                    <div>Estoque</div>
+                    <div>Ações</div>
                 </div>
-                <div id="tabelaMovimentacoes"></div>
+                <div id="listaProdutos">
+                    <div id="loading">Carregando...</div>
+                </div>
             </div>
         </div>
 
-        <!-- HISTÓRICO MATÉRIA-PRIMA -->
-        <h3 class="section-title" style="margin-top: 40px;">🧪 Histórico de Matéria-Prima</h3>
-        <div class="card">
-            <div class="subtext" style="margin-bottom: 15px;">
-                Inclui baixas automáticas geradas por vendas de produtos com receita cadastrada.
+        <!-- ABA AGENDAMENTOS -->
+        <div id="tab-agendamentos" class="tab-content">
+            <div class="section-title">
+                Agendamentos
+                <button class="btn btn-success" onclick="abrirModalAgendamento()">➕ Novo Agendamento</button>
             </div>
+            
+            <div id="listaAgendamentos">
+                <div id="loading">Carregando...</div>
+            </div>
+        </div>
+
+        <!-- ABA MATÉRIAS-PRIMAS -->
+        <div id="tab-materias" class="tab-content">
+            <div class="section-title">
+                Matérias-Primas
+                <button class="btn btn-secondary btn-small" onclick="abrirModalMateriaPrima()">➕ Nova Matéria-Prima</button>
+            </div>
+            
             <div class="table-container">
-                <div class="table-header" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr;">
+                <div class="table-header">
                     <div>Matéria-Prima</div>
-                    <div>Tipo</div>
-                    <div>Qtd</div>
-                    <div>Produto (se automática)</div>
-                    <div>Data</div>
+                    <div>SKU</div>
+                    <div>Custo</div>
+                    <div>Estoque</div>
+                    <div>Unidade</div>
+                    <div>Ações</div>
                 </div>
-                <div id="tabelaMovimentacoesMP"></div>
+                <div id="listaMateria">
+                    <div id="loading">Carregando...</div>
+                </div>
             </div>
         </div>
     </div>
-    
-    <!-- MODAL NOVO PRODUTO -->
+
+    <!-- MODAIS -->
+    <!-- Modal Produto -->
     <div id="modalProduto" class="modal">
         <div class="modal-content">
-            <h2>Novo Produto</h2>
-            
-            <div class="form-group">
-                <label>Nome do Produto</label>
-                <input type="text" id="nomeProduto" placeholder="ex: Furadeira Bosch">
-            </div>
-            
-            <div class="form-group">
-                <label>SKU/Código (opcional)</label>
-                <input type="text" id="skuProduto" placeholder="ex: SKU-123">
-            </div>
-            
-            <div class="form-group">
-                <label>Unidade</label>
-                <select id="unidadeProduto">
-                    <option value="un">Unidade</option>
-                    <option value="kg">Kg</option>
-                    <option value="l">Litro</option>
-                    <option value="cx">Caixa</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label>Custo Unitário (R$)</label>
-                <input type="number" id="custoProduto" placeholder="0.00" step="0.01">
-            </div>
-            
-            <div class="form-group">
-                <label>Preço de Venda (R$)</label>
-                <input type="number" id="precoProduto" placeholder="0.00" step="0.01">
-            </div>
-            
-            <div class="form-group">
-                <label>Estoque Inicial</label>
-                <input type="number" id="estoqueProduto" placeholder="0" step="0.01">
-            </div>
-            
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="fecharModalProduto()">Cancelar</button>
-                <button class="btn btn-primary" onclick="salvarProduto()">Salvar</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL NOVA MATÉRIA-PRIMA -->
-    <div id="modalMateriaPrima" class="modal">
-        <div class="modal-content">
-            <h2>Nova Matéria-Prima</h2>
-
-            <div class="form-group">
-                <label>Nome da Matéria-Prima</label>
-                <input type="text" id="nomeMP" placeholder="ex: Farinha de trigo">
-            </div>
-
-            <div class="form-group">
-                <label>SKU/Código (opcional)</label>
-                <input type="text" id="skuMP" placeholder="ex: MP-001">
-            </div>
-
-            <div class="form-group">
-                <label>Unidade</label>
-                <select id="unidadeMP">
-                    <option value="un">Unidade</option>
-                    <option value="kg">Kg</option>
-                    <option value="g">Grama</option>
-                    <option value="l">Litro</option>
-                    <option value="ml">Mililitro</option>
-                    <option value="cx">Caixa</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>Custo Unitário (R$)</label>
-                <input type="number" id="custoMP" placeholder="0.00" step="0.01">
-            </div>
-
-            <div class="form-group">
-                <label>Estoque Inicial</label>
-                <input type="number" id="estoqueMP" placeholder="0" step="0.01">
-            </div>
-
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="fecharModalMateriaPrima()">Cancelar</button>
-                <button class="btn btn-primary" onclick="salvarMateriaPrima()">Salvar</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL RECEITA DO PRODUTO -->
-    <div id="modalReceita" class="modal">
-        <div class="modal-content" style="max-width: 560px;">
-            <h2 id="tituloReceita">Receita do Produto</h2>
-
-            <div id="listaReceitaItens" style="margin-bottom: 20px;"></div>
-
-            <div class="form-group">
-                <label>Adicionar matéria-prima</label>
-                <div style="display: flex; gap: 10px;">
-                    <select id="selectMateriaReceita" style="flex: 2;"></select>
-                    <input type="number" id="qtdMateriaReceita" placeholder="Qtd por unidade" step="0.001" style="flex: 1;">
-                    <button class="btn btn-primary btn-small" onclick="adicionarItemReceita()">+</button>
+            <div class="modal-header">Novo Produto</div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nome do Produto</label>
+                    <input type="text" id="nomeProduto">
+                </div>
+                <div class="form-group">
+                    <label>SKU</label>
+                    <input type="text" id="skuProduto">
+                </div>
+                <div class="form-group">
+                    <label>Custo Unitário</label>
+                    <input type="number" id="custoProduto" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Preço de Venda</label>
+                    <input type="number" id="precoProduto" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Estoque Atual</label>
+                    <input type="number" id="estoqueProduto" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Unidade</label>
+                    <select id="unidadeProduto">
+                        <option>un</option>
+                        <option>kg</option>
+                        <option>l</option>
+                        <option>m</option>
+                        <option>cm</option>
+                    </select>
                 </div>
             </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="salvarProduto()">Salvar</button>
+                <button class="btn btn-secondary" onclick="fecharModalProduto()" style="background:#999">Cancelar</button>
+            </div>
+        </div>
+    </div>
 
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="fecharModalReceita()">Cancelar</button>
-                <button class="btn btn-primary" onclick="salvarReceita()">Salvar Receita</button>
+    <!-- Modal Agendamento -->
+    <div id="modalAgendamento" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Novo Agendamento</div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Produto</label>
+                    <select id="selectProdutoAgendamento">
+                        <option value="">Selecione um produto...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Data</label>
+                    <input type="date" id="dataAgendamento">
+                </div>
+                <div class="form-group">
+                    <label>Hora</label>
+                    <input type="time" id="horaAgendamento">
+                </div>
+                <div class="form-group">
+                    <label>Quantidade</label>
+                    <input type="number" id="qtdAgendamento" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Notas</label>
+                    <textarea id="notasAgendamento" placeholder="Alguma observação importante?"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-success" onclick="salvarAgendamento()">Agendar</button>
+                <button class="btn btn-secondary" onclick="fecharModalAgendamento()" style="background:#999">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Matéria-Prima -->
+    <div id="modalMateriaPrima" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Nova Matéria-Prima</div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" id="nomeMP">
+                </div>
+                <div class="form-group">
+                    <label>SKU</label>
+                    <input type="text" id="skuMP">
+                </div>
+                <div class="form-group">
+                    <label>Custo Unitário</label>
+                    <input type="number" id="custoMP" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Estoque Atual</label>
+                    <input type="number" id="estoqueMP" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Unidade</label>
+                    <select id="unidadeMP">
+                        <option>un</option>
+                        <option>kg</option>
+                        <option>l</option>
+                        <option>ml</option>
+                        <option>g</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="salvarMateriaPrima()">Salvar</button>
+                <button class="btn btn-secondary" onclick="fecharModalMateriaPrima()" style="background:#999">Cancelar</button>
             </div>
         </div>
     </div>
 
     <script>
-        const API_URL = '';
+        const API_URL = window.location.origin;
         const token = localStorage.getItem('token');
         
         if (!token) {
@@ -572,80 +642,134 @@
         }
         
         let produtos = [];
-        let movimentacoes = [];
         let materiasPrimas = [];
-        let movimentacoesMP = [];
-        let receitaAtual = [];      // itens da receita sendo editada no modal
-        let receitaProdutoId = null;
-        
+        let agendamentos = [];
+
         async function carregarProdutos() {
             try {
                 const res = await fetch(`${API_URL}/produtos`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                
-                if (!res.ok) throw new Error('Erro ao carregar produtos');
-                
                 produtos = await res.json();
                 exibirProdutos();
                 atualizarResumo();
+                atualizarSelectProdutosAgendamento();
             } catch (err) {
                 console.error('Erro:', err);
             }
         }
-        
-        async function carregarMovimentacoes() {
-            try {
-                const res = await fetch(`${API_URL}/movimentacoes`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                
-                if (!res.ok) throw new Error('Erro ao carregar movimentações');
-                
-                movimentacoes = await res.json();
-                exibirMovimentacoes();
-            } catch (err) {
-                console.error('Erro:', err);
-            }
-        }
-        
+
         function exibirProdutos() {
-            const tabela = document.getElementById('tabelaProdutos');
-            tabela.innerHTML = produtos.map(p => `
-                <div class="table-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;">
-                    <div><strong>${p.nome}</strong></div>
+            const div = document.getElementById('listaProdutos');
+            if (produtos.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhum produto cadastrado.</div>';
+                return;
+            }
+            
+            div.innerHTML = produtos.map(p => `
+                <div class="table-row">
+                    <div>${p.nome}</div>
                     <div>${p.sku || '-'}</div>
                     <div>
-                        ${p.estoque_atual.toFixed(2)} ${p.unidade}
-                        ${p.estoque_atual < 10 ? '<span class="badge badge-low">Baixo</span>' : '<span class="badge badge-ok">OK</span>'}
+                        <span class="editable-cell" onclick="iniciarEdicaoCusto(${p.id}, this)">
+                            R$ ${parseFloat(p.custo_unitario || 0).toFixed(2)}
+                        </span>
                     </div>
-                    <div>R$ ${p.custo_unitario.toFixed(2)}</div>
-                    <div>R$ ${p.preco_venda.toFixed(2)}</div>
-                    <div><button class="btn btn-primary btn-small" onclick="abrirModalReceita(${p.id})">🧪 Receita</button></div>
+                    <div>
+                        <span class="editable-cell" onclick="iniciarEdicaoPreco(${p.id}, this)">
+                            R$ ${parseFloat(p.preco_venda || 0).toFixed(2)}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="badge ${p.estoque_atual > 10 ? 'badge-ok' : 'badge-low'}">
+                            ${p.estoque_atual} ${p.unidade || 'un'}
+                        </span>
+                    </div>
+                    <div>
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalReceita(${p.id})">📝 Receita</button>
+                    </div>
                 </div>
             `).join('');
         }
-        
-        function exibirMovimentacoes() {
-            const tabela = document.getElementById('tabelaMovimentacoes');
-            tabela.innerHTML = movimentacoes.slice(0, 50).map(m => {
-                const tipo = {
-                    'entrada': '📥 Entrada',
-                    'saida': '📤 Saída',
-                    'venda': '💰 Venda',
-                    'ajuste': '🔧 Ajuste'
-                }[m.tipo] || m.tipo;
+
+        function iniciarEdicaoCusto(produtoId, elemento) {
+            const valorAtual = parseFloat(elemento.textContent.replace('R$ ', ''));
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.01';
+            input.value = valorAtual;
+            
+            elemento.innerHTML = '';
+            elemento.appendChild(input);
+            input.focus();
+            
+            input.onblur = () => salvarCusto(produtoId, parseFloat(input.value), elemento);
+            input.onkeypress = (e) => {
+                if (e.key === 'Enter') salvarCusto(produtoId, parseFloat(input.value), elemento);
+            };
+        }
+
+        function iniciarEdicaoPreco(produtoId, elemento) {
+            const valorAtual = parseFloat(elemento.textContent.replace('R$ ', ''));
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.01';
+            input.value = valorAtual;
+            
+            elemento.innerHTML = '';
+            elemento.appendChild(input);
+            input.focus();
+            
+            input.onblur = () => salvarPreco(produtoId, parseFloat(input.value), elemento);
+            input.onkeypress = (e) => {
+                if (e.key === 'Enter') salvarPreco(produtoId, parseFloat(input.value), elemento);
+            };
+        }
+
+        async function salvarCusto(produtoId, valor, elemento) {
+            try {
+                const res = await fetch(`${API_URL}/produtos/${produtoId}/valores`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ custo_unitario: valor })
+                });
                 
-                return `
-                    <div class="table-row">
-                        <div>${m.produto_nome || 'Produto'}</div>
-                        <div>${tipo}</div>
-                        <div>${m.quantidade.toFixed(2)}</div>
-                        <div>R$ ${m.valor_unitario.toFixed(2)}</div>
-                        <div>${new Date(m.criado_em).toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
-                    </div>
-                `;
-            }).join('');
+                if (res.ok) {
+                    elemento.innerHTML = `R$ ${valor.toFixed(2)}`;
+                    carregarProdutos();
+                } else {
+                    alert('Erro ao salvar');
+                    elemento.innerHTML = `R$ ${(produtos.find(p => p.id === produtoId)?.custo_unitario || 0).toFixed(2)}`;
+                }
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        async function salvarPreco(produtoId, valor, elemento) {
+            try {
+                const res = await fetch(`${API_URL}/produtos/${produtoId}/valores`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ preco_venda: valor })
+                });
+                
+                if (res.ok) {
+                    elemento.innerHTML = `R$ ${valor.toFixed(2)}`;
+                    carregarProdutos();
+                } else {
+                    alert('Erro ao salvar');
+                    elemento.innerHTML = `R$ ${(produtos.find(p => p.id === produtoId)?.preco_venda || 0).toFixed(2)}`;
+                }
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
         }
 
         async function carregarMateriasPrimas() {
@@ -653,9 +777,6 @@
                 const res = await fetch(`${API_URL}/materias-primas`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-
-                if (!res.ok) throw new Error('Erro ao carregar matérias-primas');
-
                 materiasPrimas = await res.json();
                 exibirMateriasPrimas();
             } catch (err) {
@@ -663,106 +784,101 @@
             }
         }
 
-        async function carregarMovimentacoesMP() {
+        function exibirMateriasPrimas(lista = materiasPrimas) {
+            const div = document.getElementById('listaMateria');
+            if (lista.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhuma matéria-prima cadastrada.</div>';
+                return;
+            }
+            
+            div.innerHTML = lista.map(m => `
+                <div class="table-row">
+                    <div>${m.nome}</div>
+                    <div>${m.sku || '-'}</div>
+                    <div>R$ ${parseFloat(m.custo_unitario || 0).toFixed(2)}</div>
+                    <div>${m.estoque_atual}</div>
+                    <div>${m.unidade}</div>
+                    <div>
+                        <button class="btn btn-secondary btn-small" onclick="deletarMateria(${m.id})">🗑️ Deletar</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function carregarAgendamentos() {
             try {
-                const res = await fetch(`${API_URL}/movimentacoes-materia-prima`, {
+                const res = await fetch(`${API_URL}/agendamentos`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-
-                if (!res.ok) throw new Error('Erro ao carregar movimentações de matéria-prima');
-
-                movimentacoesMP = await res.json();
-                exibirMovimentacoesMP();
+                agendamentos = await res.json();
+                exibirAgendamentos();
             } catch (err) {
                 console.error('Erro:', err);
             }
         }
 
-        function exibirMateriasPrimas(lista = materiasPrimas) {
-            const tabela = document.getElementById('tabelaMateriasPrimas');
-            tabela.innerHTML = lista.map(m => `
-                <div class="table-row" style="grid-template-columns: 2fr 1fr 1fr 1fr;">
-                    <div><strong>${m.nome}</strong></div>
-                    <div>${m.sku || '-'}</div>
-                    <div>
-                        ${m.estoque_atual.toFixed(2)} ${m.unidade}
-                        ${m.estoque_atual < 10 ? '<span class="badge badge-low">Baixo</span>' : '<span class="badge badge-ok">OK</span>'}
-                    </div>
-                    <div>R$ ${m.custo_unitario.toFixed(2)}</div>
-                </div>
-            `).join('');
-        }
-
-        function exibirMovimentacoesMP() {
-            const tabela = document.getElementById('tabelaMovimentacoesMP');
-            tabela.innerHTML = movimentacoesMP.slice(0, 50).map(m => {
-                const tipo = {
-                    'entrada': '📥 Entrada',
-                    'saida': '📤 Saída',
-                    'ajuste': '🔧 Ajuste',
-                    'baixa_receita': '⚙️ Baixa automática (venda)'
-                }[m.tipo] || m.tipo;
-
+        function exibirAgendamentos() {
+            const div = document.getElementById('listaAgendamentos');
+            if (agendamentos.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhum agendamento.</div>';
+                return;
+            }
+            
+            div.innerHTML = agendamentos.map(a => {
+                const data = new Date(a.data_agendamento);
+                const dataStr = data.toLocaleDateString('pt-BR');
+                const horaStr = data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                
                 return `
-                    <div class="table-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr;">
-                        <div>${m.materia_prima_nome || 'Matéria-prima'}</div>
-                        <div>${tipo}</div>
-                        <div>${parseFloat(m.quantidade).toFixed(3)}</div>
-                        <div>${m.produto_origem_nome || '-'}</div>
-                        <div>${new Date(m.criado_em).toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div class="agendamento-card">
+                        <div class="agendamento-info">
+                            <strong>${a.produto_nome}</strong>
+                            <small>📅 ${dataStr} às ${horaStr}</small>
+                            <small style="display:block">📦 ${a.quantidade} unidades</small>
+                            ${a.notas ? `<small style="display:block; margin-top:5px; color:#666;">📝 ${a.notas}</small>` : ''}
+                        </div>
+                        <div class="agendamento-actions">
+                            <button class="btn btn-secondary btn-small" onclick="deletarAgendamento(${a.id})">🗑️</button>
+                        </div>
                     </div>
                 `;
             }).join('');
         }
 
-        function filtrarMateriasPrimas() {
-            const termo = document.getElementById('filtroNomeMP').value.toLowerCase();
-            exibirMateriasPrimas(materiasPrimas.filter(m => m.nome.toLowerCase().includes(termo)));
+        function atualizarSelectProdutosAgendamento() {
+            const select = document.getElementById('selectProdutoAgendamento');
+            select.innerHTML = '<option value="">Selecione um produto...</option>' +
+                produtos.map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
         }
-        
-        function atualizarResumo() {
-            const totalProdutos = produtos.length;
-            const valorEstoque = produtos.reduce((sum, p) => sum + (p.estoque_atual * p.custo_unitario), 0);
-            const itensbaixos = produtos.filter(p => p.estoque_atual < 10).length;
+
+        function abrirAba(aba) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
             
-            document.getElementById('totalProdutos').textContent = totalProdutos;
-            document.getElementById('valorEstoque').textContent = 'R$ ' + valorEstoque.toFixed(2);
-            document.getElementById('itensBaixos').textContent = itensbaixos;
+            document.getElementById(`tab-${aba}`).classList.add('active');
+            event.target.classList.add('active');
         }
-        
-        function filtrarProdutos() {
-            // TODO: Implementar filtro
-        }
-        
-        function filtrarMovimentacoes() {
-            // TODO: Implementar filtro
-        }
-        
-        function exportarCSV() {
-            // TODO: Implementar export CSV
-            alert('CSV em desenvolvimento');
-        }
-        
-        function exportarExcel() {
-            // TODO: Implementar export Excel
-            alert('Excel em desenvolvimento');
-        }
-        
+
         function abrirModalProduto() {
             document.getElementById('modalProduto').classList.add('show');
+            document.getElementById('nomeProduto').value = '';
+            document.getElementById('skuProduto').value = '';
+            document.getElementById('custoProduto').value = '';
+            document.getElementById('precoProduto').value = '';
+            document.getElementById('estoqueProduto').value = '';
         }
-        
+
         function fecharModalProduto() {
             document.getElementById('modalProduto').classList.remove('show');
         }
-        
+
         async function salvarProduto() {
             const nome = document.getElementById('nomeProduto').value;
             const sku = document.getElementById('skuProduto').value;
-            const unidade = document.getElementById('unidadeProduto').value;
             const custo = parseFloat(document.getElementById('custoProduto').value);
             const preco = parseFloat(document.getElementById('precoProduto').value);
             const estoque = parseFloat(document.getElementById('estoqueProduto').value);
+            const unidade = document.getElementById('unidadeProduto').value;
             
             if (!nome || !custo || !preco) {
                 alert('Preencha os campos obrigatórios');
@@ -791,25 +907,20 @@
             }
         }
 
-        // ── MATÉRIA-PRIMA ──
         function abrirModalMateriaPrima() {
             document.getElementById('modalMateriaPrima').classList.add('show');
         }
 
         function fecharModalMateriaPrima() {
             document.getElementById('modalMateriaPrima').classList.remove('show');
-            document.getElementById('nomeMP').value = '';
-            document.getElementById('skuMP').value = '';
-            document.getElementById('custoMP').value = '';
-            document.getElementById('estoqueMP').value = '';
         }
 
         async function salvarMateriaPrima() {
             const nome = document.getElementById('nomeMP').value;
             const sku = document.getElementById('skuMP').value;
-            const unidade = document.getElementById('unidadeMP').value;
             const custo = parseFloat(document.getElementById('custoMP').value) || 0;
             const estoque = parseFloat(document.getElementById('estoqueMP').value) || 0;
+            const unidade = document.getElementById('unidadeMP').value;
 
             if (!nome) {
                 alert('Preencha o nome da matéria-prima');
@@ -837,121 +948,122 @@
             }
         }
 
-        // ── RECEITA (ficha técnica) ──
-        async function abrirModalReceita(produtoId) {
-            const produto = produtos.find(p => p.id === produtoId);
-            if (!produto) return;
-
-            receitaProdutoId = produtoId;
-            document.getElementById('tituloReceita').textContent = `Receita de "${produto.nome}"`;
-
-            // garante que já temos a lista de matérias-primas pro select
-            if (materiasPrimas.length === 0) {
-                await carregarMateriasPrimas();
-            }
-            const select = document.getElementById('selectMateriaReceita');
-            select.innerHTML = materiasPrimas.map(m => `<option value="${m.id}">${m.nome} (${m.unidade})</option>`).join('');
-
+        async function deletarMateria(id) {
+            if (!confirm('Deletar esta matéria-prima?')) return;
             try {
-                const res = await fetch(`${API_URL}/produtos/${produtoId}/receita`, {
+                const res = await fetch(`${API_URL}/materias-primas/${id}`, {
+                    method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                if (!res.ok) throw new Error('Erro ao carregar receita');
-                const itens = await res.json();
-                receitaAtual = itens.map(i => ({
-                    materia_prima_id: i.materia_prima_id,
-                    nome: i.materia_prima_nome,
-                    unidade: i.unidade,
-                    quantidade_necessaria: parseFloat(i.quantidade_necessaria)
-                }));
+                if (res.ok) carregarMateriasPrimas();
             } catch (err) {
-                console.error('Erro:', err);
-                receitaAtual = [];
+                alert('Erro: ' + err.message);
             }
-
-            renderReceitaItens();
-            document.getElementById('modalReceita').classList.add('show');
         }
 
-        function fecharModalReceita() {
-            document.getElementById('modalReceita').classList.remove('show');
-            receitaAtual = [];
-            receitaProdutoId = null;
+        function abrirModalAgendamento() {
+            document.getElementById('modalAgendamento').classList.add('show');
+            document.getElementById('dataAgendamento').valueAsDate = new Date();
         }
 
-        function renderReceitaItens() {
-            const div = document.getElementById('listaReceitaItens');
-            if (receitaAtual.length === 0) {
-                div.innerHTML = '<div class="subtext">Nenhuma matéria-prima adicionada ainda.</div>';
-                return;
-            }
-            div.innerHTML = receitaAtual.map(i => `
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f0f0f0;">
-                    <div>${i.quantidade_necessaria} ${i.unidade} de <strong>${i.nome}</strong> por unidade</div>
-                    <button class="btn btn-secondary btn-small" onclick="removerItemReceita(${i.materia_prima_id})">Remover</button>
-                </div>
-            `).join('');
+        function fecharModalAgendamento() {
+            document.getElementById('modalAgendamento').classList.remove('show');
         }
 
-        function adicionarItemReceita() {
-            const select = document.getElementById('selectMateriaReceita');
-            const materiaPrimaId = parseInt(select.value);
-            const quantidade = parseFloat(document.getElementById('qtdMateriaReceita').value);
+        async function salvarAgendamento() {
+            const produtoId = parseInt(document.getElementById('selectProdutoAgendamento').value);
+            const data = document.getElementById('dataAgendamento').value;
+            const hora = document.getElementById('horaAgendamento').value;
+            const qtd = parseFloat(document.getElementById('qtdAgendamento').value);
+            const notas = document.getElementById('notasAgendamento').value;
 
-            if (!materiaPrimaId || !quantidade || quantidade <= 0) {
-                alert('Escolha a matéria-prima e informe uma quantidade válida');
+            if (!produtoId || !data || !hora || !qtd) {
+                alert('Preencha todos os campos obrigatórios');
                 return;
             }
 
-            const materia = materiasPrimas.find(m => m.id === materiaPrimaId);
-            // se já existe na lista, atualiza a quantidade em vez de duplicar
-            const existente = receitaAtual.find(i => i.materia_prima_id === materiaPrimaId);
-            if (existente) {
-                existente.quantidade_necessaria = quantidade;
-            } else {
-                receitaAtual.push({
-                    materia_prima_id: materiaPrimaId,
-                    nome: materia.nome,
-                    unidade: materia.unidade,
-                    quantidade_necessaria: quantidade
-                });
-            }
-
-            document.getElementById('qtdMateriaReceita').value = '';
-            renderReceitaItens();
-        }
-
-        function removerItemReceita(materiaPrimaId) {
-            receitaAtual = receitaAtual.filter(i => i.materia_prima_id !== materiaPrimaId);
-            renderReceitaItens();
-        }
-
-        async function salvarReceita() {
-            if (!receitaProdutoId) return;
             try {
-                const res = await fetch(`${API_URL}/produtos/${receitaProdutoId}/receita`, {
-                    method: 'PUT',
+                const res = await fetch(`${API_URL}/agendamentos`, {
+                    method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        itens: receitaAtual.map(i => ({
-                            materia_prima_id: i.materia_prima_id,
-                            quantidade_necessaria: i.quantidade_necessaria
-                        }))
+                        produto_id: produtoId,
+                        data_agendamento: data,
+                        hora: hora,
+                        quantidade: qtd,
+                        notas: notas
                     })
                 });
 
-                if (!res.ok) throw new Error('Erro ao salvar receita');
+                if (!res.ok) throw new Error('Erro ao agendar');
 
-                fecharModalReceita();
-                alert('Receita salva com sucesso!');
+                fecharModalAgendamento();
+                carregarAgendamentos();
+                alert('Agendamento criado com sucesso!');
             } catch (err) {
                 alert('Erro: ' + err.message);
             }
         }
-        
+
+        async function deletarAgendamento(id) {
+            if (!confirm('Deletar este agendamento?')) return;
+            try {
+                const res = await fetch(`${API_URL}/agendamentos/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) carregarAgendamentos();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        function downloadTemplateExcel() {
+            window.location.href = `${API_URL}/dashboard/template-excel`;
+        }
+
+        function importarExcel() {
+            const file = document.getElementById('fileImportProdutos').files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch(`${API_URL}/produtos/importar-excel`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert(`✅ ${data.produtos_criados} produtos importados com sucesso!`);
+                carregarProdutos();
+                document.getElementById('fileImportProdutos').value = '';
+            })
+            .catch(err => alert('Erro ao importar: ' + err.message));
+        }
+
+        function exportarCSV() {
+            window.location.href = `${API_URL}/dashboard/export.csv`;
+        }
+
+        function exportarExcel() {
+            window.location.href = `${API_URL}/dashboard/export.excel`;
+        }
+
+        function atualizarResumo() {
+            const totalProdutos = produtos.length;
+            const valorEstoque = produtos.reduce((sum, p) => sum + (p.estoque_atual * p.custo_unitario), 0);
+            const itensbaixos = produtos.filter(p => p.estoque_atual < 10).length;
+            
+            document.getElementById('totalProdutos').textContent = totalProdutos;
+            document.getElementById('valorEstoque').textContent = 'R$ ' + valorEstoque.toFixed(2);
+            document.getElementById('itensBaixos').textContent = itensbaixos;
+        }
+
         function logout() {
             localStorage.clear();
             window.location.href = 'login.html';
@@ -959,7 +1071,8 @@
         
         // Carregar dados ao iniciar
         carregarProdutos();
-        carregarMovimentacoes();
+        carregarMateriasPrimas();
+        carregarAgendamentos();
     </script>
 </body>
 </html>
