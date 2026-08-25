@@ -10,13 +10,15 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 import jwt
 import httpx
+import openpyxl
+import pandas as pd
 
 # ─────────────────────────────────────────
 #  CONFIG
@@ -205,6 +207,17 @@ class ReceitaItemBody(BaseModel):
 
 class ReceitaBody(BaseModel):
     itens: list[ReceitaItemBody]
+
+class AgendamentoBody(BaseModel):
+    produto_id: int
+    data_agendamento: str  # ISO format: YYYY-MM-DD
+    hora: str  # HH:MM
+    quantidade: float
+    notas: Optional[str] = None
+
+class ProdutoEditarBody(BaseModel):
+    custo_unitario: Optional[float] = None
+    preco_venda: Optional[float] = None
 
 # ─────────────────────────────────────────
 #  HELPERS DE NEGÓCIO
@@ -1130,6 +1143,29 @@ def criar_tabelas_resumo_automatico():
     finally:
         conn.close()
 
+def criar_tabelas_agendamentos():
+    """Cria a tabela agendamentos no startup SE ela não existir."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS agendamentos (
+                id              SERIAL PRIMARY KEY,
+                cliente_id      INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                produto_id      INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+                data_agendamento TIMESTAMP NOT NULL,
+                quantidade      FLOAT NOT NULL,
+                notas           TEXT,
+                criado_em       TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """)
+        conn.commit()
+        print("✅ Tabela agendamentos: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela agendamentos: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -1137,6 +1173,7 @@ def criar_tabelas_resumo_automatico():
 async def lifespan(app: FastAPI):
     # 1️⃣ Criar tabelas necessárias
     criar_tabelas_resumo_automatico()
+    criar_tabelas_agendamentos()
     
     # 2️⃣ Testar conexão com banco
     try:
@@ -1315,6 +1352,20 @@ def atualizar_produto(produto_id: int, body: ProdutoBody, cliente=Depends(get_cu
 @app.delete("/produtos/{produto_id}")
 def deletar_produto(produto_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
     db_exec(conn, "UPDATE produtos SET ativo = FALSE WHERE id = %s AND cliente_id = %s", (produto_id, cliente["id"]))
+    return {"ok": True}
+
+@app.patch("/produtos/{produto_id}/valores")
+def editar_valores_produto(produto_id: int, body: ProdutoEditarBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Endpoint rápido pra editar só custo/preço (inline editing)"""
+    produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s", (produto_id, cliente["id"]))
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+    
+    if body.custo_unitario is not None:
+        db_exec(conn, "UPDATE produtos SET custo_unitario=%s WHERE id=%s", (body.custo_unitario, produto_id))
+    if body.preco_venda is not None:
+        db_exec(conn, "UPDATE produtos SET preco_venda=%s WHERE id=%s", (body.preco_venda, produto_id))
+    
     return {"ok": True}
 
 # ═════════════════════════════════════════
@@ -1509,6 +1560,146 @@ def export_csv(de: Optional[str] = None, ate: Optional[str] = None,
         iter([buf.getvalue()]), media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=movimentacoes.csv"}
     )
+
+@app.get("/dashboard/export.excel")
+def export_excel(de: Optional[str] = None, ate: Optional[str] = None,
+                  cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    sql = """
+        SELECT m.criado_em, p.nome AS produto, m.tipo, m.quantidade, m.valor_unitario, m.valor_total, m.origem
+        FROM movimentacoes m JOIN produtos p ON p.id = m.produto_id
+        WHERE m.cliente_id = %s
+    """
+    params = [cliente["id"]]
+    if de:
+        sql += " AND m.criado_em::date >= %s"; params.append(de)
+    if ate:
+        sql += " AND m.criado_em::date <= %s"; params.append(ate)
+    sql += " ORDER BY m.criado_em DESC"
+    linhas = db_all(conn, sql, tuple(params))
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Movimentações"
+    ws.append(["Data", "Produto", "Tipo", "Quantidade", "Valor Unitário", "Valor Total", "Origem"])
+    for l in linhas:
+        ws.append([l["criado_em"], l["produto"], l["tipo"], l["quantidade"],
+                    l["valor_unitario"], l["valor_total"], l["origem"]])
+    
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=movimentacoes.xlsx"}
+    )
+
+@app.get("/dashboard/template-excel")
+def template_excel(cliente=Depends(get_current_cliente)):
+    """Retorna um template Excel vazio pra cliente preencher e importar"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Produtos"
+    ws.append(["Nome do Produto", "SKU", "Custo Unitário", "Preço de Venda", "Estoque Atual", "Unidade"])
+    
+    # Adiciona uma linha de exemplo
+    ws.append(["Exemplo: Hambúrguer", "HAM-001", "5.50", "15.00", "10", "un"])
+    
+    # Formata o header
+    for cell in ws[1]:
+        cell.font = openpyxl.styles.Font(bold=True)
+        cell.fill = openpyxl.styles.PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+    
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=template-produtos.xlsx"}
+    )
+
+@app.post("/produtos/importar-excel")
+async def importar_excel(file: UploadFile = File(...), cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Importa produtos de um arquivo Excel"""
+    try:
+        conteudo = await file.read()
+        df = pd.read_excel(io.BytesIO(conteudo))
+        
+        colunas_esperadas = ["Nome do Produto", "SKU", "Custo Unitário", "Preço de Venda", "Estoque Atual", "Unidade"]
+        for col in colunas_esperadas:
+            if col not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Coluna ausente: {col}")
+        
+        produtos_criados = 0
+        for idx, row in df.iterrows():
+            nome = str(row["Nome do Produto"]).strip()
+            if not nome or nome.startswith("Exemplo"):
+                continue
+            
+            try:
+                db_exec(conn, """
+                    INSERT INTO produtos (cliente_id, nome, sku, custo_unitario, preco_venda, estoque_atual, unidade, ativo)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
+                """, (
+                    cliente["id"],
+                    nome,
+                    str(row["SKU"]).strip() if pd.notna(row["SKU"]) else "",
+                    float(row["Custo Unitário"]) if pd.notna(row["Custo Unitário"]) else 0,
+                    float(row["Preço de Venda"]) if pd.notna(row["Preço de Venda"]) else 0,
+                    float(row["Estoque Atual"]) if pd.notna(row["Estoque Atual"]) else 0,
+                    str(row["Unidade"]).strip() if pd.notna(row["Unidade"]) else "un"
+                ))
+                produtos_criados += 1
+            except Exception as e:
+                print(f"Erro ao importar linha {idx}: {e}")
+        
+        return {"ok": True, "produtos_criados": produtos_criados}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao processar arquivo: {str(e)}")
+
+# ═════════════════════════════════════════
+#  AGENDAMENTOS
+# ═════════════════════════════════════════
+@app.post("/agendamentos")
+def criar_agendamento(body: AgendamentoBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Criar novo agendamento"""
+    produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s", (body.produto_id, cliente["id"]))
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+    
+    # Combina data e hora em um datetime
+    try:
+        data_hora_str = f"{body.data_agendamento} {body.hora}:00"
+        data_agendamento = datetime.fromisoformat(data_hora_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data/hora inválida (use YYYY-MM-DD e HH:MM)")
+    
+    db_exec(conn, """
+        INSERT INTO agendamentos (cliente_id, produto_id, data_agendamento, quantidade, notas, criado_em)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (cliente["id"], body.produto_id, data_agendamento, body.quantidade, body.notas or "", datetime.utcnow()))
+    
+    return {"ok": True}
+
+@app.get("/agendamentos")
+def listar_agendamentos(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Listar agendamentos do cliente"""
+    return db_all(conn, """
+        SELECT a.id, a.produto_id, a.data_agendamento, a.quantidade, a.notas, p.nome AS produto_nome
+        FROM agendamentos a
+        JOIN produtos p ON p.id = a.produto_id
+        WHERE a.cliente_id = %s
+        ORDER BY a.data_agendamento DESC
+    """, (cliente["id"],))
+
+@app.delete("/agendamentos/{agendamento_id}")
+def deletar_agendamento(agendamento_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Deletar agendamento"""
+    agendamento = db_one(conn, "SELECT * FROM agendamentos WHERE id = %s AND cliente_id = %s", (agendamento_id, cliente["id"]))
+    if not agendamento:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+    db_exec(conn, "DELETE FROM agendamentos WHERE id = %s", (agendamento_id,))
+    return {"ok": True}
 
 # ═════════════════════════════════════════
 #  WHATSAPP — webhook e status
