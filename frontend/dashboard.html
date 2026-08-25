@@ -355,6 +355,10 @@
             gap: 20px;
             border-bottom: 2px solid #e0e0e0;
             margin-bottom: 30px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
         }
 
         .tab-btn {
@@ -367,6 +371,8 @@
             color: #999;
             border-bottom: 3px solid transparent;
             transition: all 0.3s;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .tab-btn.active {
@@ -416,6 +422,136 @@
             text-align: center;
             padding: 20px;
             color: #999;
+        }
+
+        /* ───────────────────────────────────────
+           RESPONSIVO — MOBILE
+           ─────────────────────────────────────── */
+        html, body {
+            overflow-x: hidden;
+            max-width: 100%;
+        }
+
+        @media (max-width: 768px) {
+            .topbar {
+                padding: 15px 16px;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
+            .topbar h1 {
+                font-size: 18px;
+            }
+
+            .container {
+                padding: 16px 12px;
+            }
+
+            .grid-2,
+            .grid-3 {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                margin-bottom: 20px;
+            }
+
+            .card {
+                padding: 18px;
+            }
+
+            .card .value {
+                font-size: 24px;
+            }
+
+            .section-title {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                font-size: 17px;
+            }
+
+            .export-buttons {
+                flex-wrap: wrap;
+                width: 100%;
+                gap: 8px;
+            }
+
+            .export-buttons .btn {
+                flex: 1 1 auto;
+            }
+
+            .tabs {
+                gap: 12px;
+                margin-bottom: 20px;
+                padding-bottom: 4px;
+            }
+
+            .tab-btn {
+                font-size: 14px;
+            }
+
+            /* Tabelas viram cartões empilhados: cada .table-row passa a ter
+               1 coluna só, com os rótulos do cabeçalho repetidos via
+               data-label em cada célula (ver JS: montarCelulasMobile). */
+            .table-header {
+                display: none;
+            }
+
+            .table-row {
+                display: grid !important;
+                grid-template-columns: 1fr !important;
+                gap: 4px;
+                padding: 14px 16px;
+            }
+
+            .table-row > div {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 10px;
+                padding: 4px 0;
+            }
+
+            .table-row > div[data-label]::before {
+                content: attr(data-label);
+                font-size: 11px;
+                font-weight: 700;
+                color: #999;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                flex-shrink: 0;
+            }
+
+            .table-row > div:last-child {
+                justify-content: flex-end;
+                border-top: 1px solid #f0f0f0;
+                margin-top: 6px;
+                padding-top: 10px;
+            }
+
+            .modal-content {
+                padding: 20px;
+                width: 94%;
+                max-height: 85vh;
+            }
+
+            .agendamento-card {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .agendamento-actions {
+                align-self: flex-end;
+            }
+
+            .filters {
+                gap: 8px;
+            }
+
+            .filters input,
+            .filters select {
+                flex: 1 1 auto;
+            }
         }
     </style>
 </head>
@@ -865,20 +1001,20 @@
             
             div.innerHTML = produtos.map(p => `
                 <div class="table-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr;">
-                    <div>${p.nome}</div>
-                    <div>${p.sku || '-'}</div>
-                    <div>${p.unidade || 'un'}</div>
-                    <div>
+                    <div data-label="Produto">${p.nome}</div>
+                    <div data-label="SKU">${p.sku || '-'}</div>
+                    <div data-label="Unidade">${p.unidade || 'un'}</div>
+                    <div data-label="Custo">
                         <span class="editable-cell" onclick="iniciarEdicaoCusto(${p.id}, this)">
                             R$ ${parseFloat(p.custo_unitario || 0).toFixed(2)}
                         </span>
                     </div>
-                    <div>
+                    <div data-label="Venda">
                         <span class="editable-cell" onclick="iniciarEdicaoPreco(${p.id}, this)">
                             R$ ${parseFloat(p.preco_venda || 0).toFixed(2)}
                         </span>
                     </div>
-                    <div>
+                    <div data-label="Estoque">
                         <span class="badge ${p.estoque_atual > 10 ? 'badge-ok' : 'badge-low'}">
                             ${p.estoque_atual} ${p.unidade || 'un'}
                         </span>
@@ -992,11 +1128,11 @@
             
             div.innerHTML = lista.map(m => `
                 <div class="table-row">
-                    <div>${m.nome}</div>
-                    <div>${m.sku || '-'}</div>
-                    <div>R$ ${parseFloat(m.custo_unitario || 0).toFixed(2)}</div>
-                    <div>${m.estoque_atual}</div>
-                    <div>${m.unidade}</div>
+                    <div data-label="Matéria-Prima">${m.nome}</div>
+                    <div data-label="SKU">${m.sku || '-'}</div>
+                    <div data-label="Custo">R$ ${parseFloat(m.custo_unitario || 0).toFixed(2)}</div>
+                    <div data-label="Estoque">${m.estoque_atual}</div>
+                    <div data-label="Unidade">${m.unidade}</div>
                     <div>
                         <button class="btn btn-secondary btn-small" onclick="deletarMateria(${m.id})">🗑️ Deletar</button>
                     </div>
@@ -1089,11 +1225,11 @@
                 const dataStr = data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                 return `
                     <div class="table-row" style="grid-template-columns: 1.4fr 2fr 1fr 1fr 1.4fr 1fr;">
-                        <div>${dataStr}</div>
-                        <div>${v.produto_nome}</div>
-                        <div>${v.quantidade}</div>
-                        <div>R$ ${parseFloat(v.valor_total || 0).toFixed(2)}</div>
-                        <div>${v.cliente_negocio_nome || '-'}</div>
+                        <div data-label="Data">${dataStr}</div>
+                        <div data-label="Produto">${v.produto_nome}</div>
+                        <div data-label="Qtd">${v.quantidade}</div>
+                        <div data-label="Valor">R$ ${parseFloat(v.valor_total || 0).toFixed(2)}</div>
+                        <div data-label="Cliente">${v.cliente_negocio_nome || '-'}</div>
                         <div>
                             <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarVenda(${v.id})">🗑️ Excluir</button>
                         </div>
@@ -1153,10 +1289,10 @@
                 const resumoItens = itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ') || '-';
                 return `
                     <div class="table-row" style="grid-template-columns: 1.4fr 2fr 1fr 1.4fr 1fr;">
-                        <div>${dataStr}</div>
-                        <div>${o.nome_cliente || 'Não informado'}</div>
-                        <div title="${resumoItens}">${itens.length} item(ns)</div>
-                        <div>R$ ${parseFloat(o.total || 0).toFixed(2)}</div>
+                        <div data-label="Data">${dataStr}</div>
+                        <div data-label="Cliente">${o.nome_cliente || 'Não informado'}</div>
+                        <div data-label="Itens" title="${resumoItens}">${itens.length} item(ns)</div>
+                        <div data-label="Total">R$ ${parseFloat(o.total || 0).toFixed(2)}</div>
                         <div style="display:flex; gap:6px;">
                             <button class="btn btn-secondary btn-small" onclick="verTextoOrcamento(${o.id})">📄</button>
                             <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarOrcamento(${o.id})">🗑️</button>
@@ -1220,9 +1356,9 @@
                 const desde = c.criado_em ? new Date(c.criado_em).toLocaleDateString('pt-BR') : '-';
                 return `
                     <div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr 1.6fr;">
-                        <div>${c.nome}</div>
-                        <div>${c.telefone || '-'}</div>
-                        <div>${desde}</div>
+                        <div data-label="Nome">${c.nome}</div>
+                        <div data-label="Telefone">${c.telefone || '-'}</div>
+                        <div data-label="Desde">${desde}</div>
                         <div style="display:flex; gap:6px; flex-wrap:wrap;">
                             <button class="btn btn-secondary btn-small" onclick="verHistoricoCliente(${c.id})">📜 Histórico</button>
                             <button class="btn btn-secondary btn-small" onclick="abrirModalClienteNegocioEditar(${c.id})">✏️</button>
@@ -1358,8 +1494,8 @@
 
             div.innerHTML = custosFixos.map(c => `
                 <div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr;">
-                    <div>${c.nome_da_conta}</div>
-                    <div>R$ ${parseFloat(c.valor || 0).toFixed(2)}</div>
+                    <div data-label="Conta">${c.nome_da_conta}</div>
+                    <div data-label="Valor">R$ ${parseFloat(c.valor || 0).toFixed(2)}</div>
                     <div style="display:flex; gap:6px;">
                         <button class="btn btn-secondary btn-small" onclick="abrirModalCustoFixoEditar(${c.id})">✏️</button>
                         <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarCustoFixo(${c.id})">🗑️</button>
