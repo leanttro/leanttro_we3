@@ -55,7 +55,8 @@ MENU_TEXTO = (
     "8️⃣ Cadastrar matéria-prima\n"
     "9️⃣ Montar receita de um produto\n"
     "🔟 Configurar resumo automático\n"
-    "1️⃣1️⃣ Ajuda — o que cada opção faz\n\n"
+    "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
+    "1️⃣2️⃣ Montar orçamento\n\n"
     "Responda com o número da opção."
 )
 
@@ -363,6 +364,95 @@ def avancar_fila_ou_confirmar(conn, numero_autorizado_id: int, dados: dict, tipo
         return f"Confirma {acao}?\n{corpo}\n\nResponda SIM ou NÃO."
     return f"Confirma {acao}?\n{corpo}\n\nTotal: R$ {total_geral:.2f}\n\nResponda SIM ou NÃO."
 
+# ─────────────────────────────────────────
+#  ORÇAMENTO — helpers compartilhados (painel HTTP + bot WhatsApp)
+# ─────────────────────────────────────────
+def calcular_itens_orcamento(conn, cliente_id: int, itens: list) -> tuple:
+    """itens: lista de dicts {'produto_id': int, 'quantidade': float}.
+    Retorna (itens_detalhados, subtotal). Lança ValueError se algum produto não existir."""
+    itens_detalhados = []
+    subtotal = 0.0
+    for item in itens:
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                          (item["produto_id"], cliente_id))
+        if not produto:
+            raise ValueError(f"Produto {item['produto_id']} não encontrado")
+        preco_unitario = float(produto["preco_venda"] or 0)
+        subtotal_item = preco_unitario * item["quantidade"]
+        subtotal += subtotal_item
+        itens_detalhados.append({
+            "produto_id": produto["id"],
+            "nome": produto["nome"],
+            "quantidade": item["quantidade"],
+            "preco_unitario": preco_unitario,
+            "subtotal": subtotal_item,
+        })
+    return itens_detalhados, subtotal
+
+def calcular_desconto(subtotal: float, desconto_tipo: Optional[str], desconto_valor_informado: float) -> float:
+    if desconto_tipo == "percentual":
+        desconto_calculado = subtotal * (desconto_valor_informado / 100)
+    elif desconto_tipo == "valor":
+        desconto_calculado = desconto_valor_informado
+    else:
+        desconto_calculado = 0.0
+    return min(max(desconto_calculado, 0.0), subtotal)  # nunca deixa o total ficar negativo
+
+def montar_texto_orcamento(cliente: dict, itens_detalhados: list, subtotal: float, desconto_tipo: Optional[str],
+                            desconto_calculado: float, desconto_valor_informado: float, total: float,
+                            observacoes: Optional[str] = None, nome_cliente: Optional[str] = None) -> str:
+    linhas = ["🧾 *Orçamento*"]
+    if cliente.get("nome_negocio"):
+        linhas.append(f"_{cliente['nome_negocio']}_")
+    if nome_cliente:
+        linhas.append(f"Para: {nome_cliente}")
+    linhas.append("")
+    for item in itens_detalhados:
+        linhas.append(f"▪️ {formatar_qtd(item['quantidade'])}x {item['nome']} — {formatar_moeda(item['subtotal'])}")
+    linhas.append("")
+    linhas.append(f"Subtotal: {formatar_moeda(subtotal)}")
+    if desconto_calculado > 0:
+        if desconto_tipo == "percentual":
+            linhas.append(f"Desconto ({formatar_qtd(desconto_valor_informado)}%): -{formatar_moeda(desconto_calculado)}")
+        else:
+            linhas.append(f"Desconto: -{formatar_moeda(desconto_calculado)}")
+    linhas.append(f"*Total: {formatar_moeda(total)}*")
+    if observacoes:
+        linhas.append("")
+        linhas.append(observacoes)
+    return "\n".join(linhas)
+
+def salvar_orcamento_db(conn, cliente_id: int, nome_cliente, itens_detalhados: list, subtotal: float,
+                         desconto_tipo, desconto_calculado: float, total: float, texto_formatado: str,
+                         observacoes) -> dict:
+    return db_exec(conn, """
+        INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+    """, (
+        cliente_id, nome_cliente, json.dumps(itens_detalhados), subtotal,
+        desconto_tipo, desconto_calculado, total, texto_formatado, observacoes
+    ))
+
+def parse_desconto_texto(texto: str, subtotal: float):
+    """Interpreta a resposta do usuário no passo de desconto do bot.
+    Aceita 'não'/'nao'/'n'/'0' (sem desconto), '10%' (percentual) ou '10'/'r$10' (valor em R$).
+    Retorna (tipo, valor_informado) — tipo é None quando não há desconto — ou None se não entendeu."""
+    t = texto.strip().lower()
+    if t in ("não", "nao", "n", "0", "sem desconto", "nenhum", "pular"):
+        return (None, 0.0)
+    t_limpo = t.replace("r$", "").strip()
+    if t_limpo.endswith("%"):
+        try:
+            valor = float(t_limpo[:-1].replace(",", "."))
+            return ("percentual", valor)
+        except ValueError:
+            return None
+    try:
+        valor = float(t_limpo.replace(",", "."))
+        return ("valor", valor)
+    except ValueError:
+        return None
+
 def aplicar_movimentacao(conn, cliente_id, produto_id, numero_autorizado_id, tipo, quantidade, valor_unitario, origem, mensagem_original=None):
     quantidade = float(quantidade)
     valor_unitario = float(valor_unitario or 0)
@@ -577,6 +667,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
         if texto.strip() == "11" or texto_low in ("ajuda", "help"):
             return TEXTO_AJUDA + "\n\n" + resposta_menu()
+
+        if texto.strip() == "12":
+            produtos = listar_produtos_cliente(conn, cliente["id"])
+            if not produtos:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return ("Você ainda não tem nenhum produto cadastrado. "
+                        "Cadastre pelo painel (+ Novo Produto) e volte aqui depois.\n\n") + resposta_menu()
+            dados = {"produtos_ids": [p["id"] for p in produtos]}
+            salvar_sessao(conn, numero_autorizado_id, "orc_escolha_produtos", dados)
+            rodape = "Responda com o(s) número(s) dos produtos do orçamento. Pra mais de um, separe por vírgula (ex: 1,3,5)."
+            return montar_lista_numerada(produtos, "🧾 *Montar orçamento*\nQuais produtos entram?", rodape=rodape)
 
         # modo IA: tenta extrair da mensagem livre antes de cair no menu
         if cliente["plano"] == "ia":
@@ -968,6 +1069,88 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         resumo_horarios = " e ".join(horarios)
         return (
             f"✅ Resumo automático configurado para {resumo_horarios} (todos os números autorizados recebem).\n\n"
+            + resposta_menu()
+        )
+
+    # ── ETAPA: orçamento (opção 12) — escolhendo o(s) produto(s) ──
+    if etapa == "orc_escolha_produtos":
+        produtos_ids = dados.get("produtos_ids", [])
+        indices = parse_selecao_multipla(texto, len(produtos_ids))
+        if not indices:
+            return (f"Manda o número do produto (1 a {len(produtos_ids)}). "
+                     "Pra mais de um, separe por vírgula, ex: 1,3.")
+        escolhidos_ids = [produtos_ids[i - 1] for i in indices]
+        primeiro = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (escolhidos_ids[0],))
+        dados["fila_orc_produtos_ids"] = escolhidos_ids[1:]
+        dados["orc_itens"] = []
+        dados["produto_id"] = primeiro["id"]
+        dados["produto_nome"] = primeiro["nome"]
+        salvar_sessao(conn, numero_autorizado_id, "orc_qtd_item", dados)
+        return f"Quantidade de *{primeiro['nome']}*?"
+
+    # ── ETAPA: orçamento — pedindo quantidade de cada item ──
+    if etapa == "orc_qtd_item":
+        try:
+            quantidade = float(texto.replace(",", "."))
+        except ValueError:
+            return "Manda só o número da quantidade, por favor."
+        if quantidade <= 0:
+            return "A quantidade precisa ser maior que zero."
+        dados.setdefault("orc_itens", []).append({
+            "produto_id": dados["produto_id"], "quantidade": quantidade,
+        })
+        fila = dados.get("fila_orc_produtos_ids", [])
+        if fila:
+            proximo_id = fila.pop(0)
+            produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s", (proximo_id,))
+            dados["fila_orc_produtos_ids"] = fila
+            dados["produto_id"] = produto["id"]
+            dados["produto_nome"] = produto["nome"]
+            salvar_sessao(conn, numero_autorizado_id, "orc_qtd_item", dados)
+            return f"Quantidade de *{produto['nome']}*?"
+        salvar_sessao(conn, numero_autorizado_id, "orc_desconto", dados)
+        return "Quer aplicar algum desconto?\nDigite um valor em R$ (ex: 10), um percentual (ex: 10%), ou NÃO."
+
+    # ── ETAPA: orçamento — desconto ──
+    if etapa == "orc_desconto":
+        try:
+            _, subtotal_atual = calcular_itens_orcamento(conn, cliente["id"], dados.get("orc_itens", []))
+        except ValueError as e:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return f"❌ {e}\n\n" + resposta_menu()
+        resultado_desconto = parse_desconto_texto(texto, subtotal_atual)
+        if resultado_desconto is None:
+            return "Não entendi. Digite um valor em R$ (ex: 10), um percentual (ex: 10%), ou NÃO."
+        desconto_tipo, desconto_valor_informado = resultado_desconto
+        dados["orc_desconto_tipo"] = desconto_tipo
+        dados["orc_desconto_valor_informado"] = desconto_valor_informado
+        salvar_sessao(conn, numero_autorizado_id, "orc_nome_cliente", dados)
+        return "Nome do cliente pra colocar no orçamento? (digite PULAR se não quiser informar)"
+
+    # ── ETAPA: orçamento — nome do cliente (última pergunta) e geração do texto final ──
+    if etapa == "orc_nome_cliente":
+        nome_cliente = None if texto_low == "pular" else texto.strip()
+        try:
+            itens_detalhados, subtotal = calcular_itens_orcamento(conn, cliente["id"], dados.get("orc_itens", []))
+        except ValueError as e:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return f"❌ {e}\n\n" + resposta_menu()
+        desconto_tipo = dados.get("orc_desconto_tipo")
+        desconto_valor_informado = dados.get("orc_desconto_valor_informado", 0.0) or 0.0
+        desconto_calculado = calcular_desconto(subtotal, desconto_tipo, desconto_valor_informado)
+        total = subtotal - desconto_calculado
+        texto_formatado = montar_texto_orcamento(
+            cliente, itens_detalhados, subtotal, desconto_tipo, desconto_calculado,
+            desconto_valor_informado, total, observacoes=None, nome_cliente=nome_cliente
+        )
+        salvar_orcamento_db(conn, cliente["id"], nome_cliente, itens_detalhados, subtotal,
+                             desconto_tipo, desconto_calculado, total, texto_formatado, None)
+        salvar_sessao(conn, numero_autorizado_id, "menu", {})
+        return (
+            "✅ Orçamento pronto! Copia a mensagem abaixo e encaminha pro seu cliente:\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            f"{texto_formatado}\n"
+            "━━━━━━━━━━━━━━━\n\n"
             + resposta_menu()
         )
 
@@ -1758,64 +1941,25 @@ def criar_orcamento(body: OrcamentoBody, cliente=Depends(get_current_cliente), c
     if not body.itens:
         raise HTTPException(status_code=400, detail="Adicione ao menos um produto")
 
-    itens_detalhados = []
-    subtotal = 0.0
-    for item in body.itens:
-        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
-                          (item.produto_id, cliente["id"]))
-        if not produto:
-            raise HTTPException(status_code=404, detail=f"Produto {item.produto_id} não encontrado")
-        preco_unitario = float(produto["preco_venda"] or 0)
-        subtotal_item = preco_unitario * item.quantidade
-        subtotal += subtotal_item
-        itens_detalhados.append({
-            "produto_id": produto["id"],
-            "nome": produto["nome"],
-            "quantidade": item.quantidade,
-            "preco_unitario": preco_unitario,
-            "subtotal": subtotal_item,
-        })
+    itens_input = [{"produto_id": item.produto_id, "quantidade": item.quantidade} for item in body.itens]
+    try:
+        itens_detalhados, subtotal = calcular_itens_orcamento(conn, cliente["id"], itens_input)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     desconto_tipo = body.desconto_tipo if body.desconto_tipo in ("valor", "percentual") else None
     desconto_valor_informado = float(body.desconto_valor or 0)
-    if desconto_tipo == "percentual":
-        desconto_calculado = subtotal * (desconto_valor_informado / 100)
-    elif desconto_tipo == "valor":
-        desconto_calculado = desconto_valor_informado
-    else:
-        desconto_calculado = 0.0
-    desconto_calculado = min(desconto_calculado, subtotal)  # nunca deixa o total ficar negativo
+    desconto_calculado = calcular_desconto(subtotal, desconto_tipo, desconto_valor_informado)
     total = subtotal - desconto_calculado
 
     # ── Monta o texto formatado (pronto pra copiar/enviar no WhatsApp) ──
-    linhas = ["🧾 *Orçamento*"]
-    if cliente.get("nome_negocio"):
-        linhas.append(f"_{cliente['nome_negocio']}_")
-    if body.nome_cliente:
-        linhas.append(f"Para: {body.nome_cliente}")
-    linhas.append("")
-    for item in itens_detalhados:
-        linhas.append(f"▪️ {formatar_qtd(item['quantidade'])}x {item['nome']} — {formatar_moeda(item['subtotal'])}")
-    linhas.append("")
-    linhas.append(f"Subtotal: {formatar_moeda(subtotal)}")
-    if desconto_calculado > 0:
-        if desconto_tipo == "percentual":
-            linhas.append(f"Desconto ({formatar_qtd(desconto_valor_informado)}%): -{formatar_moeda(desconto_calculado)}")
-        else:
-            linhas.append(f"Desconto: -{formatar_moeda(desconto_calculado)}")
-    linhas.append(f"*Total: {formatar_moeda(total)}*")
-    if body.observacoes:
-        linhas.append("")
-        linhas.append(body.observacoes)
-    texto_formatado = "\n".join(linhas)
+    texto_formatado = montar_texto_orcamento(
+        cliente, itens_detalhados, subtotal, desconto_tipo, desconto_calculado,
+        desconto_valor_informado, total, observacoes=body.observacoes, nome_cliente=body.nome_cliente
+    )
 
-    registro = db_exec(conn, """
-        INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
-    """, (
-        cliente["id"], body.nome_cliente, json.dumps(itens_detalhados), subtotal,
-        desconto_tipo, desconto_calculado, total, texto_formatado, body.observacoes
-    ))
+    registro = salvar_orcamento_db(conn, cliente["id"], body.nome_cliente, itens_detalhados, subtotal,
+                                    desconto_tipo, desconto_calculado, total, texto_formatado, body.observacoes)
     return registro
 
 @app.get("/orcamentos")
