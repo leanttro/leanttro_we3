@@ -714,7 +714,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             if extraido and extraido.get("tipo") in ("entrada", "venda", "saida"):
                 return await preparar_confirmacao_ia(conn, cliente, numero_autorizado_id, extraido, texto)
 
-        return "Não entendi 🤔\n\n" + resposta_menu()
+        return "Olá, bem-vindo(a) ao Painel do Seu Negócio!\n\n" + resposta_menu()
 
     # ── ETAPA: escolhendo o(s) produto(s) da lista numerada ──
     if etapa.endswith("_produto"):
