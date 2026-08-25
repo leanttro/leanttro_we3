@@ -45,18 +45,18 @@ GROQ_MODELOS_FALLBACK = [
 # roteamento em processar_texto() lá embaixo.
 MENU_TEXTO = (
     "📋 *Menu*\n"
-    "1️⃣ Registrar entrada de estoque\n"
+    "1️⃣ Montar orçamento\n"
     "2️⃣ Registrar venda\n"
-    "3️⃣ Ajuste manual\n"
-    "4️⃣ Consultar estoque de um produto\n"
+    "3️⃣ Cadastrar produto\n"
+    "4️⃣ Cadastrar matéria-prima\n"
     "5️⃣ Resumo do dia\n"
-    "6️⃣ Visão geral do estoque\n"
-    "7️⃣ Cadastrar produto\n"
-    "8️⃣ Cadastrar matéria-prima\n"
-    "9️⃣ Montar receita de um produto\n"
-    "🔟 Configurar resumo automático\n"
+    "6️⃣ Registrar entrada de estoque\n"
+    "7️⃣ Visão geral do estoque\n"
+    "8️⃣ Configurar resumo automático\n"
+    "9️⃣ Adicionar Produto\n"
+    "🔟 Editar Produto\n"
     "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
-    "1️⃣2️⃣ Montar orçamento\n\n"
+    "0️⃣ Abrir menu\n\n"
     "Responda com o número da opção."
 )
 
