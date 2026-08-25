@@ -827,6 +827,28 @@
                 <button class="btn btn-success" onclick="abrirModalClienteNegocio()">➕ Novo Cliente</button>
             </div>
 
+            <!-- ATENDIMENTO AUTOMÁTICO AO CLIENTE FINAL -->
+            <div class="card" style="margin-bottom: 20px; border-left: 4px solid #25D366;">
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+                    <div>
+                        <h2 style="margin-bottom:6px;">🤖 Atendimento automático pro cliente</h2>
+                        <div style="font-size:13px; color:#666; max-width:520px;">
+                            Quando ativado, os clientes cadastrados abaixo (pelo telefone) podem mandar
+                            mensagem nesse mesmo número do WhatsApp e ver seus produtos/serviços, pedir
+                            orçamento ou chamar um atendente — sem mexer em estoque, vendas ou o resto do sistema.
+                        </div>
+                    </div>
+                    <label style="position:relative; display:inline-block; width:54px; height:30px; flex-shrink:0;">
+                        <input type="checkbox" id="toggleAtendimentoClienteFinal" onchange="alterarAtendimentoClienteFinal()"
+                               style="opacity:0; width:0; height:0;">
+                        <span id="sliderAtendimentoClienteFinal" style="position:absolute; cursor:pointer; inset:0;
+                              background-color:#ccc; transition:.3s; border-radius:30px;"></span>
+                        <span id="boliniAtendimentoClienteFinal" style="position:absolute; height:22px; width:22px; left:4px; bottom:4px;
+                              background-color:white; transition:.3s; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>
+                    </label>
+                </div>
+            </div>
+
             <div class="table-container">
                 <div class="table-header" style="grid-template-columns: 2fr 1.5fr 1fr 1.6fr;">
                     <div>Nome</div>
@@ -1205,8 +1227,42 @@
                 if (!res.ok) return;
                 clienteAtual = await res.json();
                 aplicarModulosNaUI(clienteAtual.modulos && clienteAtual.modulos.length ? clienteAtual.modulos : ['estoque']);
+                aplicarToggleAtendimentoClienteFinal(!!clienteAtual.atendimento_cliente_final_ativado);
             } catch (err) {
                 console.error('Erro ao carregar dados do cliente:', err);
+            }
+        }
+
+        // Reflete o estado (ligado/desligado) do toggle na UI sem disparar o onchange.
+        function aplicarToggleAtendimentoClienteFinal(ativado) {
+            const input = document.getElementById('toggleAtendimentoClienteFinal');
+            const slider = document.getElementById('sliderAtendimentoClienteFinal');
+            const bolinha = document.getElementById('boliniAtendimentoClienteFinal');
+            if (!input) return;
+            input.checked = ativado;
+            slider.style.backgroundColor = ativado ? '#25D366' : '#ccc';
+            bolinha.style.transform = ativado ? 'translateX(24px)' : 'translateX(0)';
+        }
+
+        // Chamado quando a dona clica no toggle — liga/desliga o atendimento
+        // automático pro cliente final no backend.
+        async function alterarAtendimentoClienteFinal() {
+            const ativado = document.getElementById('toggleAtendimentoClienteFinal').checked;
+            aplicarToggleAtendimentoClienteFinal(ativado); // feedback visual imediato
+            try {
+                const res = await fetch(`${API_URL}/cliente/atendimento-cliente-final`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ativado })
+                });
+                if (!res.ok) throw new Error('Falha ao atualizar');
+            } catch (err) {
+                console.error('Erro ao alterar atendimento ao cliente final:', err);
+                alert('Não foi possível salvar. Tenta de novo.');
+                aplicarToggleAtendimentoClienteFinal(!ativado); // reverte visualmente
             }
         }
 
