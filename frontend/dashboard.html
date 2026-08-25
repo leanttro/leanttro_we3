@@ -18,7 +18,7 @@
         }
         
         .topbar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
             color: white;
             padding: 20px 30px;
             display: flex;
@@ -417,126 +417,6 @@
             padding: 20px;
             color: #999;
         }
-
-        .orcamento-item-row {
-            display: grid;
-            grid-template-columns: 2fr 1fr auto;
-            gap: 10px;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .btn-icon {
-            background: #ffe0e0;
-            color: #c33;
-            border: none;
-            border-radius: 6px;
-            width: 38px;
-            height: 38px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-
-        .btn-icon:hover {
-            background: #ffd0d0;
-        }
-
-        .btn-add-item {
-            background: #e8eef7;
-            color: #667eea;
-            border: 1px dashed #667eea;
-            border-radius: 6px;
-            padding: 10px;
-            width: 100%;
-            cursor: pointer;
-            font-weight: 600;
-            margin-bottom: 15px;
-        }
-
-        .btn-add-item:hover {
-            background: #dde5f5;
-        }
-
-        .orcamento-totais {
-            background: #f9f9f9;
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-
-        .orcamento-totais .linha-total {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 6px;
-            color: #666;
-        }
-
-        .orcamento-totais .linha-total.final {
-            font-size: 18px;
-            font-weight: bold;
-            color: #333;
-            border-top: 1px solid #e0e0e0;
-            padding-top: 8px;
-            margin-top: 8px;
-        }
-
-        .orcamento-texto {
-            background: #f9f9f9;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 15px;
-            white-space: pre-wrap;
-            font-family: monospace;
-            font-size: 13px;
-            color: #333;
-            margin-bottom: 15px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .orcamento-card {
-            background: #f9f9f9;
-            border-left: 4px solid #51cf66;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 6px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .orcamento-card-info {
-            flex: 1;
-            min-width: 200px;
-        }
-
-        .orcamento-card-info strong {
-            display: block;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .orcamento-card-info small {
-            color: #999;
-            display: block;
-        }
-
-        .orcamento-card-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .btn-whatsapp {
-            background: #25D366;
-            color: white;
-        }
-
-        .btn-whatsapp:hover {
-            background: #1ebe5a;
-        }
     </style>
 </head>
 <body>
@@ -568,7 +448,6 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="abrirAba('produtos')">📦 Produtos</button>
             <button class="tab-btn" onclick="abrirAba('agendamentos')">📅 Agendamentos</button>
-            <button class="tab-btn" onclick="abrirAba('orcamentos')">🧾 Orçamentos</button>
             <button class="tab-btn" onclick="abrirAba('materias')">🧪 Matérias-Primas</button>
         </div>
 
@@ -609,18 +488,6 @@
             </div>
             
             <div id="listaAgendamentos">
-                <div id="loading">Carregando...</div>
-            </div>
-        </div>
-
-        <!-- ABA ORÇAMENTOS -->
-        <div id="tab-orcamentos" class="tab-content">
-            <div class="section-title">
-                Orçamentos
-                <button class="btn btn-success" onclick="abrirModalOrcamento()">➕ Novo Orçamento</button>
-            </div>
-
-            <div id="listaOrcamentos">
                 <div id="loading">Carregando...</div>
             </div>
         </div>
@@ -762,65 +629,6 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="salvarMateriaPrima()">Salvar</button>
                 <button class="btn btn-secondary" onclick="fecharModalMateriaPrima()" style="background:#999">Cancelar</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Novo Orçamento -->
-    <div id="modalOrcamento" class="modal">
-        <div class="modal-content" style="max-width:600px">
-            <div class="modal-header">Novo Orçamento</div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>Nome do Cliente (opcional)</label>
-                    <input type="text" id="nomeClienteOrcamento" placeholder="Ex: João Silva">
-                </div>
-
-                <label style="display:block; margin-bottom:8px; font-weight:500; color:#333;">Produtos</label>
-                <div id="itensOrcamento"></div>
-                <button type="button" class="btn-add-item" onclick="adicionarItemOrcamento()">➕ Adicionar produto</button>
-
-                <div class="form-group">
-                    <label>Desconto</label>
-                    <div style="display:flex; gap:10px;">
-                        <select id="descontoTipoOrcamento" style="flex:1" onchange="atualizarPreviewOrcamento()">
-                            <option value="">Sem desconto</option>
-                            <option value="valor">R$ (valor fixo)</option>
-                            <option value="percentual">% (percentual)</option>
-                        </select>
-                        <input type="number" id="descontoValorOrcamento" step="0.01" placeholder="0" style="flex:1" oninput="atualizarPreviewOrcamento()">
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Observações (opcional)</label>
-                    <textarea id="observacoesOrcamento" placeholder="Ex: Válido por 7 dias, entrega não incluída..."></textarea>
-                </div>
-
-                <div class="orcamento-totais" id="orcamentoTotaisPreview">
-                    <div class="linha-total"><span>Subtotal</span><span id="previewSubtotal">R$ 0,00</span></div>
-                    <div class="linha-total"><span>Desconto</span><span id="previewDesconto">R$ 0,00</span></div>
-                    <div class="linha-total final"><span>Total</span><span id="previewTotal">R$ 0,00</span></div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-success" onclick="salvarOrcamento()">Gerar Orçamento</button>
-                <button class="btn btn-secondary" onclick="fecharModalOrcamento()" style="background:#999">Cancelar</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Resultado Orçamento -->
-    <div id="modalResultadoOrcamento" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">Orçamento Gerado ✅</div>
-            <div class="modal-body">
-                <div class="orcamento-texto" id="textoOrcamentoGerado"></div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-whatsapp" onclick="enviarWhatsappOrcamento()">📱 Enviar no WhatsApp</button>
-                <button class="btn btn-secondary" onclick="copiarOrcamentoTexto()">📋 Copiar</button>
-                <button class="btn btn-secondary" onclick="fecharModalResultadoOrcamento()" style="background:#999">Fechar</button>
             </div>
         </div>
     </div>
@@ -1035,218 +843,6 @@
                     </div>
                 `;
             }).join('');
-        }
-
-        // ═══════════ ORÇAMENTOS ═══════════
-        let orcamentos = [];
-        let itemOrcamentoContador = 0;
-        let textoOrcamentoAtual = '';
-
-        function abrirModalOrcamento() {
-            document.getElementById('modalOrcamento').classList.add('show');
-            document.getElementById('nomeClienteOrcamento').value = '';
-            document.getElementById('descontoTipoOrcamento').value = '';
-            document.getElementById('descontoValorOrcamento').value = '';
-            document.getElementById('observacoesOrcamento').value = '';
-            document.getElementById('itensOrcamento').innerHTML = '';
-            itemOrcamentoContador = 0;
-            adicionarItemOrcamento();
-        }
-
-        function fecharModalOrcamento() {
-            document.getElementById('modalOrcamento').classList.remove('show');
-        }
-
-        function adicionarItemOrcamento() {
-            const id = itemOrcamentoContador++;
-            const div = document.createElement('div');
-            div.className = 'orcamento-item-row';
-            div.id = `itemOrcamento_${id}`;
-            div.innerHTML = `
-                <select onchange="atualizarPreviewOrcamento()">
-                    <option value="">Selecione um produto...</option>
-                    ${produtos.map(p => `<option value="${p.id}">${p.nome} — R$ ${parseFloat(p.preco_venda || 0).toFixed(2)}</option>`).join('')}
-                </select>
-                <input type="number" min="0.01" step="0.01" value="1" placeholder="Qtd" oninput="atualizarPreviewOrcamento()">
-                <button type="button" class="btn-icon" onclick="removerItemOrcamento(${id})">🗑️</button>
-            `;
-            document.getElementById('itensOrcamento').appendChild(div);
-        }
-
-        function removerItemOrcamento(id) {
-            const el = document.getElementById(`itemOrcamento_${id}`);
-            if (el) el.remove();
-            atualizarPreviewOrcamento();
-        }
-
-        function coletarItensOrcamento() {
-            const linhas = document.querySelectorAll('#itensOrcamento .orcamento-item-row');
-            const itens = [];
-            linhas.forEach(linha => {
-                const select = linha.querySelector('select');
-                const qtdInput = linha.querySelector('input');
-                const produtoId = parseInt(select.value);
-                const quantidade = parseFloat(qtdInput.value);
-                if (produtoId && quantidade > 0) {
-                    itens.push({ produto_id: produtoId, quantidade });
-                }
-            });
-            return itens;
-        }
-
-        function atualizarPreviewOrcamento() {
-            const itens = coletarItensOrcamento();
-            let subtotal = 0;
-            itens.forEach(item => {
-                const produto = produtos.find(p => p.id === item.produto_id);
-                if (produto) subtotal += parseFloat(produto.preco_venda || 0) * item.quantidade;
-            });
-
-            const descontoTipo = document.getElementById('descontoTipoOrcamento').value;
-            const descontoValorInput = parseFloat(document.getElementById('descontoValorOrcamento').value) || 0;
-            let desconto = 0;
-            if (descontoTipo === 'percentual') desconto = subtotal * (descontoValorInput / 100);
-            else if (descontoTipo === 'valor') desconto = descontoValorInput;
-            desconto = Math.min(desconto, subtotal);
-
-            const total = subtotal - desconto;
-
-            document.getElementById('previewSubtotal').textContent = 'R$ ' + subtotal.toFixed(2);
-            document.getElementById('previewDesconto').textContent = '- R$ ' + desconto.toFixed(2);
-            document.getElementById('previewTotal').textContent = 'R$ ' + total.toFixed(2);
-        }
-
-        async function salvarOrcamento() {
-            const itens = coletarItensOrcamento();
-            if (itens.length === 0) {
-                alert('Adicione ao menos um produto ao orçamento');
-                return;
-            }
-
-            const nomeCliente = document.getElementById('nomeClienteOrcamento').value || null;
-            const descontoTipo = document.getElementById('descontoTipoOrcamento').value || null;
-            const descontoValor = parseFloat(document.getElementById('descontoValorOrcamento').value) || 0;
-            const observacoes = document.getElementById('observacoesOrcamento').value || null;
-
-            try {
-                const res = await fetch(`${API_URL}/orcamentos`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        itens,
-                        nome_cliente: nomeCliente,
-                        desconto_tipo: descontoTipo,
-                        desconto_valor: descontoValor,
-                        observacoes
-                    })
-                });
-
-                if (!res.ok) {
-                    const erro = await res.json().catch(() => ({}));
-                    throw new Error(erro.detail || 'Erro ao gerar orçamento');
-                }
-
-                const orcamento = await res.json();
-                fecharModalOrcamento();
-                carregarOrcamentos();
-                mostrarResultadoOrcamento(orcamento.texto_formatado);
-            } catch (err) {
-                alert('Erro: ' + err.message);
-            }
-        }
-
-        function mostrarResultadoOrcamento(texto) {
-            textoOrcamentoAtual = texto;
-            document.getElementById('textoOrcamentoGerado').textContent = texto;
-            document.getElementById('modalResultadoOrcamento').classList.add('show');
-        }
-
-        function fecharModalResultadoOrcamento() {
-            document.getElementById('modalResultadoOrcamento').classList.remove('show');
-        }
-
-        function copiarOrcamentoTexto() {
-            navigator.clipboard.writeText(textoOrcamentoAtual)
-                .then(() => alert('✅ Orçamento copiado!'))
-                .catch(() => alert('Não foi possível copiar. Selecione o texto manualmente.'));
-        }
-
-        function enviarWhatsappOrcamento() {
-            const url = `https://wa.me/?text=${encodeURIComponent(textoOrcamentoAtual)}`;
-            window.open(url, '_blank');
-        }
-
-        async function carregarOrcamentos() {
-            try {
-                const res = await fetch(`${API_URL}/orcamentos`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                orcamentos = await res.json();
-                exibirOrcamentos();
-            } catch (err) {
-                console.error('Erro:', err);
-            }
-        }
-
-        function exibirOrcamentos() {
-            const div = document.getElementById('listaOrcamentos');
-            if (orcamentos.length === 0) {
-                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhum orçamento gerado ainda.</div>';
-                return;
-            }
-
-            div.innerHTML = orcamentos.map(o => {
-                const data = new Date(o.criado_em);
-                const dataStr = data.toLocaleDateString('pt-BR');
-                const itens = typeof o.itens === 'string' ? JSON.parse(o.itens) : o.itens;
-                const qtdItens = itens.length;
-
-                return `
-                    <div class="orcamento-card">
-                        <div class="orcamento-card-info">
-                            <strong>${o.nome_cliente || 'Sem cliente informado'}</strong>
-                            <small>📅 ${dataStr} • ${qtdItens} ${qtdItens === 1 ? 'item' : 'itens'}</small>
-                            <small>💰 Total: R$ ${parseFloat(o.total).toFixed(2)}</small>
-                        </div>
-                        <div class="orcamento-card-actions">
-                            <button class="btn btn-whatsapp btn-small" onclick='enviarWhatsappHistorico(${o.id})'>📱</button>
-                            <button class="btn btn-secondary btn-small" onclick='copiarOrcamentoHistorico(${o.id})'>📋</button>
-                            <button class="btn btn-secondary btn-small" onclick="deletarOrcamento(${o.id})">🗑️</button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function copiarOrcamentoHistorico(id) {
-            const o = orcamentos.find(x => x.id === id);
-            if (!o) return;
-            navigator.clipboard.writeText(o.texto_formatado)
-                .then(() => alert('✅ Orçamento copiado!'))
-                .catch(() => alert('Não foi possível copiar.'));
-        }
-
-        function enviarWhatsappHistorico(id) {
-            const o = orcamentos.find(x => x.id === id);
-            if (!o) return;
-            const url = `https://wa.me/?text=${encodeURIComponent(o.texto_formatado)}`;
-            window.open(url, '_blank');
-        }
-
-        async function deletarOrcamento(id) {
-            if (!confirm('Deletar este orçamento do histórico?')) return;
-            try {
-                const res = await fetch(`${API_URL}/orcamentos/${id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (res.ok) carregarOrcamentos();
-            } catch (err) {
-                alert('Erro: ' + err.message);
-            }
         }
 
         function atualizarSelectProdutosAgendamento() {
@@ -1500,7 +1096,6 @@
         carregarProdutos();
         carregarMateriasPrimas();
         carregarAgendamentos();
-        carregarOrcamentos();
     </script>
 </body>
 </html>
