@@ -52,7 +52,7 @@ MENU_TEXTO = (
     "6️⃣ Registrar entrada de estoque\n"
     "7️⃣ Visão geral do estoque\n"
     "8️⃣ Configurar resumo automático\n"
-    "9️⃣ Definir Matéria-Prima\n"
+    "9️⃣ Editar Matéria-Prima\n"
     "🔟 Editar Estoque ou dados do Produto\n"
     "1️⃣1️⃣ Ajuda — o que cada opção faz\n"
     "1️⃣2️⃣ Calculadora de custos fixos\n"
@@ -73,7 +73,8 @@ TEXTO_AJUDA = (
     "6️⃣ *Entrada de estoque* — registra chegada de mercadoria (aumenta o estoque).\n"
     "7️⃣ *Visão geral* — lista todos os produtos e matérias-primas com o estoque atual.\n"
     "8️⃣ *Resumo automático* — escolha até 2 horários por dia pra receber o resumo (opção 5) sem precisar pedir.\n"
-    "9️⃣ *Definir Matéria-Prima* — define quais matérias-primas (e quantidades) um produto consome (monta a receita).\n"
+    "9️⃣ *Editar Matéria-Prima* — mostra a receita atual do produto (se já tiver) e deixa você editar a quantidade "
+    "de um item, adicionar mais matéria-prima, ou remover um item, tudo na mesma conversa.\n"
     "🔟 *Editar Estoque ou dados do Produto* — ao escolher essa opção, você escolhe entre:\n"
     "   1 - Editar estoque (quantidade) de um ou mais produtos de uma vez;\n"
     "   2 - Editar nome, custo unitário, preço de venda e/ou SKU de um produto específico "
@@ -416,6 +417,28 @@ def montar_lista_numerada(itens, titulo: str, rodape: str = "Responda com o núm
     linhas.append("")
     linhas.append(rodape)
     return "\n".join(linhas)
+
+def montar_menu_edicao_receita(dados: dict) -> str:
+    """Renderiza o estado atual da receita sendo editada (opção 9 — Editar
+    Matéria-Prima) e as ações disponíveis: editar quantidade de um item
+    existente, adicionar matéria-prima nova, remover um item, ou salvar."""
+    itens = dados.get("receita_itens", [])
+    nome_produto = dados.get("receita_produto_nome", "")
+    if itens:
+        linhas = "\n".join(
+            f"{i}. {fmt_num(item['quantidade'])} {item['unidade']} de {item['nome']}"
+            for i, item in enumerate(itens, start=1)
+        )
+        corpo = f"📋 Receita atual de *{nome_produto}*:\n{linhas}"
+    else:
+        corpo = f"*{nome_produto}* ainda não tem nenhuma matéria-prima na receita."
+    rodape = (
+        "\n\nDigite o número de um item para editar a quantidade, "
+        "*novo* para adicionar uma matéria-prima, "
+        "*remover N* para tirar um item (ex: remover 2), "
+        "ou *pronto* para salvar."
+    )
+    return corpo + rodape
 
 def parse_selecao_multipla(texto: str, max_idx: int):
     """Aceita '1' ou '1,3,5' ou '1 3 5' e devolve a lista de índices (1-based)
@@ -1947,7 +1970,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             return "Cancelado.\n\n" + resposta_menu(modulos)
         return "Responda SIM ou NÃO."
 
-    # ── ETAPA: montar receita de um produto / Adicionar Produto (opção 9) ──
+    # ── ETAPA: editar receita de um produto (opção 9 — Editar Matéria-Prima) ──
     if etapa == "receita_produto_escolha":
         produtos_ids = dados.get("produtos_ids", [])
         try:
@@ -1963,36 +1986,97 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
         materias = listar_materias_primas_cliente(conn, cliente["id"])
         if not materias:
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Você ainda não tem matéria-prima cadastrada. Cadastre uma primeiro (opção 6).\n\n" + resposta_menu(modulos)
+            return "Você ainda não tem matéria-prima cadastrada. Cadastre uma primeiro (opção 4).\n\n" + resposta_menu(modulos)
+
+        receita_atual = db_all(conn, """
+            SELECT r.materia_prima_id, r.quantidade_necessaria, m.nome, m.unidade
+            FROM receita_itens r
+            JOIN materias_primas m ON m.id = r.materia_prima_id
+            WHERE r.produto_id = %s
+            ORDER BY m.nome
+        """, (produto["id"],))
+        receita_itens = [
+            {"materia_prima_id": i["materia_prima_id"], "nome": i["nome"], "unidade": i["unidade"],
+             "quantidade": float(i["quantidade_necessaria"])}
+            for i in receita_atual
+        ]
 
         dados = {
             "receita_produto_id": produto["id"], "receita_produto_nome": produto["nome"],
-            "receita_itens": [], "materias_ids": [m["id"] for m in materias],
+            "receita_itens": receita_itens,
         }
-        salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
-        return montar_lista_numerada(
-            materias, f"Montando a receita de *{produto['nome']}*.\nQual matéria-prima entra nela?",
-            rodape="Responda com o número, ou digite PRONTO quando terminar."
-        )
+        salvar_sessao(conn, numero_autorizado_id, "receita_menu_edicao", dados)
+        return montar_menu_edicao_receita(dados)
 
-    if etapa == "receita_item_escolha":
+    if etapa == "receita_menu_edicao":
         if texto_low == "pronto":
             if not dados.get("receita_itens"):
                 salvar_sessao(conn, numero_autorizado_id, "menu", {})
-                return "Nenhum item adicionado. Receita cancelada.\n\n" + resposta_menu(modulos)
+                return "Nenhum item na receita. Nada foi salvo.\n\n" + resposta_menu(modulos)
             salvar_sessao(conn, numero_autorizado_id, "confirmando_receita", dados)
             linhas = "\n".join(f"- {fmt_num(i['quantidade'])} {i['unidade']} de {i['nome']}" for i in dados["receita_itens"])
             return f"Confirma a receita de *{dados['receita_produto_nome']}*?\n{linhas}\n\nResponda SIM ou NÃO."
+
+        if texto_low == "novo":
+            usadas_ids = {i["materia_prima_id"] for i in dados.get("receita_itens", [])}
+            materias = [m for m in listar_materias_primas_cliente(conn, cliente["id"]) if m["id"] not in usadas_ids]
+            if not materias:
+                return "Todas as matérias-primas cadastradas já estão nessa receita.\n\n" + montar_menu_edicao_receita(dados)
+            dados["materias_ids"] = [m["id"] for m in materias]
+            salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
+            return montar_lista_numerada(
+                materias, "Qual matéria-prima entra na receita?",
+                rodape="Responda com o número, ou digite CANCELAR para voltar."
+            )
+
+        if texto_low.startswith("remover"):
+            partes = texto.strip().split()
+            try:
+                pos = int(partes[1])
+                assert 1 <= pos <= len(dados.get("receita_itens", []))
+            except (IndexError, ValueError, AssertionError):
+                return f"Manda *remover N*, com N de 1 a {len(dados.get('receita_itens', []))}.\n\n" + montar_menu_edicao_receita(dados)
+            removido = dados["receita_itens"].pop(pos - 1)
+            salvar_sessao(conn, numero_autorizado_id, "receita_menu_edicao", dados)
+            return f"Removido: {fmt_num(removido['quantidade'])} {removido['unidade']} de {removido['nome']}.\n\n" + montar_menu_edicao_receita(dados)
+
+        try:
+            pos = int(texto.strip())
+            assert 1 <= pos <= len(dados.get("receita_itens", []))
+        except (ValueError, AssertionError):
+            return "Não entendi. " + montar_menu_edicao_receita(dados)
+        item = dados["receita_itens"][pos - 1]
+        dados["receita_editar_idx"] = pos - 1
+        salvar_sessao(conn, numero_autorizado_id, "receita_editar_qtd", dados)
+        return (f"Quantidade atual de *{item['nome']}*: {fmt_num(item['quantidade'])} {item['unidade']}.\n"
+                f"Manda a nova quantidade de {item['unidade']} por unidade do produto.")
+
+    if etapa == "receita_editar_qtd":
+        try:
+            quantidade = float(texto.replace(",", "."))
+            assert quantidade > 0
+        except (ValueError, AssertionError):
+            return "Manda só o número da nova quantidade, por favor."
+        idx = dados.get("receita_editar_idx")
+        dados["receita_itens"][idx]["quantidade"] = quantidade
+        dados.pop("receita_editar_idx", None)
+        salvar_sessao(conn, numero_autorizado_id, "receita_menu_edicao", dados)
+        return "Quantidade atualizada!\n\n" + montar_menu_edicao_receita(dados)
+
+    if etapa == "receita_item_escolha":
+        if texto_low == "cancelar":
+            salvar_sessao(conn, numero_autorizado_id, "receita_menu_edicao", dados)
+            return montar_menu_edicao_receita(dados)
 
         materias_ids = dados.get("materias_ids", [])
         try:
             idx = int(texto.strip())
             assert 1 <= idx <= len(materias_ids)
         except (ValueError, AssertionError):
-            return f"Manda só o número da matéria-prima (1 a {len(materias_ids)}), ou PRONTO para terminar."
+            return f"Manda só o número da matéria-prima (1 a {len(materias_ids)}), ou CANCELAR para voltar."
         materia = db_one(conn, "SELECT * FROM materias_primas WHERE id = %s", (materias_ids[idx - 1],))
         if not materia:
-            return "Essa matéria-prima não existe mais. Escolha outro número ou digite PRONTO."
+            return "Essa matéria-prima não existe mais. Escolha outro número ou digite CANCELAR."
         dados["receita_item_atual"] = {"id": materia["id"], "nome": materia["nome"], "unidade": materia["unidade"]}
         salvar_sessao(conn, numero_autorizado_id, "receita_item_qtd", dados)
         return f"Quantos {materia['unidade']} de *{materia['nome']}* vão em 1 unidade do produto?"
@@ -2000,21 +2084,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
     if etapa == "receita_item_qtd":
         try:
             quantidade = float(texto.replace(",", "."))
-        except ValueError:
+            assert quantidade > 0
+        except (ValueError, AssertionError):
             return "Manda só o número da quantidade, por favor."
         item = dados["receita_item_atual"]
         dados.setdefault("receita_itens", []).append({
             "materia_prima_id": item["id"], "nome": item["nome"], "unidade": item["unidade"], "quantidade": quantidade
         })
         dados.pop("receita_item_atual", None)
-        salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
-        materias = listar_materias_primas_cliente(conn, cliente["id"])
-        dados["materias_ids"] = [m["id"] for m in materias]
-        salvar_sessao(conn, numero_autorizado_id, "receita_item_escolha", dados)
-        return montar_lista_numerada(
-            materias, "Adicionado! Mais alguma matéria-prima?",
-            rodape="Responda com o número, ou digite PRONTO para terminar."
-        )
+        dados.pop("materias_ids", None)
+        salvar_sessao(conn, numero_autorizado_id, "receita_menu_edicao", dados)
+        return "Adicionado!\n\n" + montar_menu_edicao_receita(dados)
 
     if etapa == "confirmando_receita":
         if texto_low in ("sim", "s", "confirmo", "confirmar"):
@@ -2028,8 +2108,8 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return "✅ Receita salva com sucesso! A partir de agora, vender esse produto já desconta a matéria-prima automaticamente.\n\n" + resposta_menu(modulos)
         if texto_low in ("não", "nao", "n"):
-            salvar_sessao(conn, numero_autorizado_id, "menu", {})
-            return "Cancelado.\n\n" + resposta_menu(modulos)
+            salvar_sessao(conn, numero_autorizado_id, "receita_menu_edicao", dados)
+            return "Ok, voltando pra edição.\n\n" + montar_menu_edicao_receita(dados)
         return "Responda SIM ou NÃO."
 
     # ── ETAPA: confirmando ──
