@@ -78,7 +78,8 @@ TEXTO_AJUDA = (
     "🔟 *Editar Estoque ou dados do Produto* — ao escolher essa opção, você escolhe entre:\n"
     "   1 - Editar estoque (quantidade) de um ou mais produtos de uma vez;\n"
     "   2 - Editar nome, custo unitário, preço de venda e/ou SKU de um produto específico "
-    "(você escolhe quais campos mudar, informa os novos valores e confirma antes de salvar).\n"
+    "(você escolhe quais campos mudar, informa os novos valores e confirma antes de salvar);\n"
+    "   3 - Editar estoque (quantidade) de uma ou mais matérias-primas de uma vez.\n"
     "1️⃣1️⃣ *Ajuda* — este texto que você está lendo agora.\n"
     "1️⃣2️⃣ *Calculadora de custos fixos* — soma as contas fixas do negócio (aluguel, luz, internet etc.) "
     "e mostra o total, com a lista de cada conta. É diferente da calculadora que aparece durante o cadastro "
@@ -1161,8 +1162,9 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "editar_menu", {})
             return (
                 "🔟 *Editar Estoque ou dados do Produto*\n"
-                "1 - Editar estoque (quantidade)\n"
-                "2 - Editar nome, custo, preço de venda ou SKU\n\n"
+                "1 - Editar estoque (quantidade) de produto\n"
+                "2 - Editar nome, custo, preço de venda ou SKU de produto\n"
+                "3 - Editar estoque (quantidade) de matéria-prima\n\n"
                 "Responda com o número."
             )
 
@@ -1299,7 +1301,17 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             salvar_sessao(conn, numero_autorizado_id, "editar_campo_produto_escolha", dados)
             return montar_lista_numerada(produtos, "Qual produto você quer editar (nome/custo/preço/SKU)?")
 
-        return "Responda 1 (editar estoque) ou 2 (editar nome, custo, preço ou SKU)."
+        if texto.strip() == "3":
+            materias = listar_materias_primas_cliente(conn, cliente["id"])
+            if not materias:
+                salvar_sessao(conn, numero_autorizado_id, "menu", {})
+                return "Você ainda não tem matéria-prima cadastrada.\n\n" + resposta_menu(modulos)
+            dados = {"materias_ids": [m["id"] for m in materias]}
+            salvar_sessao(conn, numero_autorizado_id, "ajuste_mp_escolha", dados)
+            rodape = "Responda com o número. Pra mais de uma, separe por vírgula (ex: 1,3,5)."
+            return montar_lista_numerada(materias, "Qual matéria-prima?", rodape=rodape)
+
+        return "Responda 1 (editar estoque de produto), 2 (editar dados do produto) ou 3 (editar estoque de matéria-prima)."
 
     # ── ETAPA: edição de produto — escolhendo QUAL produto (um só por vez) — TAREFA 1 ──
     if etapa == "editar_campo_produto_escolha":
@@ -1370,6 +1382,79 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
             nome_final = dados.get("editar_campos_novos", {}).get("nome", dados.get("editar_produto_nome"))
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return f"✅ *{nome_final}* atualizado com sucesso!\n\n" + resposta_menu(modulos)
+        if texto_low in ("não", "nao", "n"):
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Cancelado.\n\n" + resposta_menu(modulos)
+        return "Responda SIM ou NÃO."
+
+    # ── ETAPA: ajuste de estoque de matéria-prima (opção 10 → 3) ──
+    if etapa == "ajuste_mp_escolha":
+        materias_ids = dados.get("materias_ids", [])
+        indices = parse_selecao_multipla(texto, len(materias_ids))
+        if not indices:
+            return (f"Manda o número da matéria-prima (1 a {len(materias_ids)}). "
+                     "Pra mais de uma, separe por vírgula, ex: 1,3.")
+        escolhidas_ids = [materias_ids[i - 1] for i in indices]
+        primeira = db_one(conn, "SELECT * FROM materias_primas WHERE id = %s AND cliente_id = %s",
+                           (escolhidas_ids[0], cliente["id"]))
+        if not primeira:
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            return "Essa matéria-prima não existe mais.\n\n" + resposta_menu(modulos)
+        dados["fila_materias_ids"] = escolhidas_ids[1:]
+        dados["carrinho_mp"] = []
+        dados["materia_prima_id"] = primeira["id"]
+        dados["materia_prima_nome"] = primeira["nome"]
+        dados["materia_prima_unidade"] = primeira["unidade"]
+        salvar_sessao(conn, numero_autorizado_id, "ajuste_mp_quantidade", dados)
+        return (f"Estoque atual de *{primeira['nome']}*: {fmt_num(primeira['estoque_atual'])} {primeira['unidade']}.\n"
+                f"Qual a nova quantidade em estoque?")
+
+    if etapa == "ajuste_mp_quantidade":
+        try:
+            quantidade = float(texto.replace(",", "."))
+            assert quantidade >= 0
+        except (ValueError, AssertionError):
+            return "Manda só o número da nova quantidade, por favor."
+        dados.setdefault("carrinho_mp", []).append({
+            "materia_prima_id": dados["materia_prima_id"], "nome": dados["materia_prima_nome"],
+            "unidade": dados["materia_prima_unidade"], "quantidade": quantidade,
+        })
+
+        fila = dados.get("fila_materias_ids", [])
+        if fila:
+            proximo_id = fila.pop(0)
+            proxima = db_one(conn, "SELECT * FROM materias_primas WHERE id = %s AND cliente_id = %s",
+                              (proximo_id, cliente["id"]))
+            dados["fila_materias_ids"] = fila
+            if not proxima:
+                return "Essa matéria-prima não existe mais. Vou pular pra próxima."
+            dados["materia_prima_id"] = proxima["id"]
+            dados["materia_prima_nome"] = proxima["nome"]
+            dados["materia_prima_unidade"] = proxima["unidade"]
+            salvar_sessao(conn, numero_autorizado_id, "ajuste_mp_quantidade", dados)
+            return (f"Estoque atual de *{proxima['nome']}*: {fmt_num(proxima['estoque_atual'])} {proxima['unidade']}.\n"
+                    f"Qual a nova quantidade em estoque?")
+
+        salvar_sessao(conn, numero_autorizado_id, "confirmando_mp_ajuste", dados)
+        linhas = "\n".join(f"- {item['nome']} → {fmt_num(item['quantidade'])} {item['unidade']}"
+                            for item in dados["carrinho_mp"])
+        return f"Confirma os ajustes de estoque?\n{linhas}\n\nResponda SIM ou NÃO."
+
+    if etapa == "confirmando_mp_ajuste":
+        if texto_low in ("sim", "s", "confirmo", "confirmar"):
+            alertas = []
+            for item in dados.get("carrinho_mp", []):
+                _, alerta = aplicar_movimentacao_materia_prima(
+                    conn, cliente["id"], item["materia_prima_id"], numero_autorizado_id, "ajuste",
+                    item["quantidade"], 0, origem="whatsapp"
+                )
+                if alerta:
+                    alertas.append(alerta)
+            salvar_sessao(conn, numero_autorizado_id, "menu", {})
+            resposta = "✅ Estoque de matéria-prima atualizado com sucesso!"
+            if alertas:
+                resposta += "\n\n" + "\n".join(alertas)
+            return resposta + "\n\n" + resposta_menu(modulos)
         if texto_low in ("não", "nao", "n"):
             salvar_sessao(conn, numero_autorizado_id, "menu", {})
             return "Cancelado.\n\n" + resposta_menu(modulos)
