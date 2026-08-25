@@ -449,6 +449,10 @@
             <button class="tab-btn active" onclick="abrirAba('produtos')">📦 Produtos</button>
             <button class="tab-btn" onclick="abrirAba('agendamentos')">📅 Agendamentos</button>
             <button class="tab-btn" onclick="abrirAba('materias')">🧪 Matérias-Primas</button>
+            <button class="tab-btn" onclick="abrirAba('vendas')">💰 Vendas</button>
+            <button class="tab-btn" onclick="abrirAba('orcamentos')">🧾 Orçamentos</button>
+            <button class="tab-btn" onclick="abrirAba('clientes')">👤 Clientes</button>
+            <button class="tab-btn" onclick="abrirAba('custos')">🧮 Custos</button>
         </div>
 
         <!-- ABA PRODUTOS -->
@@ -466,9 +470,10 @@
             </div>
             
             <div class="table-container">
-                <div class="table-header">
+                <div class="table-header" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr;">
                     <div>Produto</div>
                     <div>SKU</div>
+                    <div>Unidade</div>
                     <div>Custo</div>
                     <div>Venda</div>
                     <div>Estoque</div>
@@ -513,14 +518,135 @@
                 </div>
             </div>
         </div>
+
+        <!-- ABA VENDAS -->
+        <div id="tab-vendas" class="tab-content">
+            <div class="section-title">
+                Vendas
+            </div>
+
+            <div class="table-container">
+                <div class="table-header" style="grid-template-columns: 1.4fr 2fr 1fr 1fr 1.4fr 1fr;">
+                    <div>Data</div>
+                    <div>Produto</div>
+                    <div>Qtd</div>
+                    <div>Valor</div>
+                    <div>Cliente</div>
+                    <div>Ações</div>
+                </div>
+                <div id="listaVendas">
+                    <div id="loading">Carregando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ABA ORÇAMENTOS -->
+        <div id="tab-orcamentos" class="tab-content">
+            <div class="section-title">
+                Orçamentos
+            </div>
+
+            <div class="table-container">
+                <div class="table-header" style="grid-template-columns: 1.4fr 2fr 1fr 1.4fr 1fr;">
+                    <div>Data</div>
+                    <div>Cliente</div>
+                    <div>Itens</div>
+                    <div>Total</div>
+                    <div>Ações</div>
+                </div>
+                <div id="listaOrcamentos">
+                    <div id="loading">Carregando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ABA CLIENTES -->
+        <div id="tab-clientes" class="tab-content">
+            <div class="section-title">
+                Clientes
+                <button class="btn btn-success" onclick="abrirModalClienteNegocio()">➕ Novo Cliente</button>
+            </div>
+
+            <div class="table-container">
+                <div class="table-header" style="grid-template-columns: 2fr 1.5fr 1fr 1.6fr;">
+                    <div>Nome</div>
+                    <div>Telefone</div>
+                    <div>Desde</div>
+                    <div>Ações</div>
+                </div>
+                <div id="listaClientesNegocio">
+                    <div id="loading">Carregando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ABA CUSTOS -->
+        <div id="tab-custos" class="tab-content">
+            <div class="section-title">
+                Custos Fixos
+                <div class="export-buttons">
+                    <button class="btn btn-success btn-small" onclick="abrirModalCustoFixo()">➕ Nova Conta</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarCustosFixosCSV()">📊 CSV</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarCustosFixosExcel()">📈 Excel</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <div class="table-header" style="grid-template-columns: 2fr 1.5fr 1fr;">
+                    <div>Conta</div>
+                    <div>Valor</div>
+                    <div>Ações</div>
+                </div>
+                <div id="listaCustosFixos">
+                    <div id="loading">Carregando...</div>
+                </div>
+            </div>
+            <div class="card" style="max-width: 320px; margin-bottom: 30px;">
+                <h2>Total de Custos Fixos</h2>
+                <div class="value" id="totalCustosFixos">R$ 0,00</div>
+                <div class="subtext">Soma mensal de todas as contas</div>
+            </div>
+
+            <div class="section-title">🧮 Calculadora de Preço</div>
+            <div class="card" style="margin-bottom: 30px;">
+                <div class="form-group">
+                    <label>Produto (opcional — preenche o custo variável automaticamente)</label>
+                    <select id="calcProdutoSelect" onchange="preencherCustoVariavelCalculadora()">
+                        <option value="">Nenhum — digitar custo variável manualmente</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Custo Variável por Unidade (R$)</label>
+                    <input type="number" id="calcCustoVariavel" step="0.01" placeholder="Ex: 12.50">
+                </div>
+                <div class="form-group">
+                    <label>Volume de Vendas Esperado por Mês</label>
+                    <input type="number" id="calcVolumeEsperado" step="1" placeholder="Ex: 100">
+                </div>
+                <div class="form-group">
+                    <label>Margem de Lucro Desejada (%)</label>
+                    <input type="number" id="calcMargem" step="1" value="30">
+                </div>
+                <button class="btn btn-secondary" onclick="calcularPrecoSugerido()">Calcular Preço Sugerido</button>
+
+                <div id="resultadoCalculadora" style="display:none; margin-top:20px; padding:15px; background:#f0f4ff; border-radius:8px;">
+                    <div><strong>Custo fixo mensal (total salvo):</strong> <span id="resCustoFixoTotal"></span></div>
+                    <div><strong>Custo fixo rateado por unidade:</strong> <span id="resCustoFixoRateado"></span></div>
+                    <div><strong>Custo total por unidade:</strong> <span id="resCustoTotalUnitario"></span></div>
+                    <div><strong>Margem aplicada:</strong> <span id="resMargem"></span></div>
+                    <div style="font-size:20px; color:#667eea; margin-top:10px;"><strong>Preço sugerido: <span id="resPrecoSugerido"></span></strong></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- MODAIS -->
     <!-- Modal Produto -->
     <div id="modalProduto" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Novo Produto</div>
+            <div class="modal-header" id="modalProdutoTitulo">Novo Produto</div>
             <div class="modal-body">
+                <input type="hidden" id="produtoEditandoId" value="">
                 <div class="form-group">
                     <label>Nome do Produto</label>
                     <input type="text" id="nomeProduto">
@@ -633,6 +759,77 @@
         </div>
     </div>
 
+    <!-- Modal Texto do Orçamento -->
+    <div id="modalTextoOrcamento" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">Texto do Orçamento</div>
+            <div class="modal-body">
+                <textarea id="textoOrcamentoFormatado" readonly style="min-height:300px; white-space:pre-wrap;"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="copiarTextoOrcamento()">📋 Copiar</button>
+                <button class="btn btn-secondary" onclick="fecharModal('modalTextoOrcamento')" style="background:#999">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Cliente do Negócio -->
+    <div id="modalClienteNegocio" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalClienteNegocioTitulo">Novo Cliente</div>
+            <div class="modal-body">
+                <input type="hidden" id="clienteNegocioEditandoId" value="">
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" id="nomeClienteNegocio">
+                </div>
+                <div class="form-group">
+                    <label>Telefone</label>
+                    <input type="text" id="telefoneClienteNegocio" placeholder="Somente números">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="salvarClienteNegocio()">Salvar</button>
+                <button class="btn btn-secondary" onclick="fecharModal('modalClienteNegocio')" style="background:#999">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Histórico do Cliente -->
+    <div id="modalHistoricoCliente" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header" id="modalHistoricoClienteTitulo">Histórico do Cliente</div>
+            <div class="modal-body">
+                <div id="listaHistoricoCliente">Carregando...</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="fecharModal('modalHistoricoCliente')" style="background:#999">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Custo Fixo -->
+    <div id="modalCustoFixo" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalCustoFixoTitulo">Nova Conta Fixa</div>
+            <div class="modal-body">
+                <input type="hidden" id="custoFixoEditandoId" value="">
+                <div class="form-group">
+                    <label>Nome da Conta</label>
+                    <input type="text" id="nomeCustoFixo" placeholder="Ex: Aluguel, Luz, Internet...">
+                </div>
+                <div class="form-group">
+                    <label>Valor Mensal (R$)</label>
+                    <input type="number" id="valorCustoFixo" step="0.01">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="salvarCustoFixo()">Salvar</button>
+                <button class="btn btn-secondary" onclick="fecharModal('modalCustoFixo')" style="background:#999">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API_URL = window.location.origin;
         const token = localStorage.getItem('token');
@@ -667,9 +864,10 @@
             }
             
             div.innerHTML = produtos.map(p => `
-                <div class="table-row">
+                <div class="table-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr;">
                     <div>${p.nome}</div>
                     <div>${p.sku || '-'}</div>
+                    <div>${p.unidade || 'un'}</div>
                     <div>
                         <span class="editable-cell" onclick="iniciarEdicaoCusto(${p.id}, this)">
                             R$ ${parseFloat(p.custo_unitario || 0).toFixed(2)}
@@ -685,8 +883,9 @@
                             ${p.estoque_atual} ${p.unidade || 'un'}
                         </span>
                     </div>
-                    <div>
-                        <button class="btn btn-secondary btn-small" onclick="abrirModalReceita(${p.id})">📝 Receita</button>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalProdutoEditar(${p.id})">✏️</button>
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalReceita(${p.id})">📝</button>
                     </div>
                 </div>
             `).join('');
@@ -849,6 +1048,441 @@
             const select = document.getElementById('selectProdutoAgendamento');
             select.innerHTML = '<option value="">Selecione um produto...</option>' +
                 produtos.map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
+
+            const selectCalc = document.getElementById('calcProdutoSelect');
+            if (selectCalc) {
+                selectCalc.innerHTML = '<option value="">Nenhum — digitar custo variável manualmente</option>' +
+                    produtos.map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
+            }
+        }
+
+        function fecharModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        // ═════════════════════════════════════
+        //  TAREFA 2 — ABA VENDAS
+        // ═════════════════════════════════════
+        let vendas = [];
+
+        async function carregarVendas() {
+            try {
+                const res = await fetch(`${API_URL}/movimentacoes?tipo=venda`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                vendas = await res.json();
+                exibirVendas();
+            } catch (err) {
+                console.error('Erro:', err);
+            }
+        }
+
+        function exibirVendas() {
+            const div = document.getElementById('listaVendas');
+            if (!vendas || vendas.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhuma venda registrada.</div>';
+                return;
+            }
+
+            div.innerHTML = vendas.map(v => {
+                const data = new Date(v.criado_em);
+                const dataStr = data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                return `
+                    <div class="table-row" style="grid-template-columns: 1.4fr 2fr 1fr 1fr 1.4fr 1fr;">
+                        <div>${dataStr}</div>
+                        <div>${v.produto_nome}</div>
+                        <div>${v.quantidade}</div>
+                        <div>R$ ${parseFloat(v.valor_total || 0).toFixed(2)}</div>
+                        <div>${v.cliente_negocio_nome || '-'}</div>
+                        <div>
+                            <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarVenda(${v.id})">🗑️ Excluir</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function deletarVenda(id) {
+            if (!confirm('Excluir esta venda? A quantidade vendida (e a matéria-prima usada, se houver) volta pro estoque.')) return;
+            try {
+                const res = await fetch(`${API_URL}/movimentacoes/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    carregarVendas();
+                    carregarProdutos();
+                    carregarMateriasPrimas();
+                } else {
+                    const erro = await res.json().catch(() => ({}));
+                    alert('Erro ao excluir: ' + (erro.detail || res.statusText));
+                }
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        // ═════════════════════════════════════
+        //  TAREFA 3 — ABA ORÇAMENTOS
+        // ═════════════════════════════════════
+        let orcamentos = [];
+
+        async function carregarOrcamentos() {
+            try {
+                const res = await fetch(`${API_URL}/orcamentos`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                orcamentos = await res.json();
+                exibirOrcamentos();
+            } catch (err) {
+                console.error('Erro:', err);
+            }
+        }
+
+        function exibirOrcamentos() {
+            const div = document.getElementById('listaOrcamentos');
+            if (!orcamentos || orcamentos.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhum orçamento gerado.</div>';
+                return;
+            }
+
+            div.innerHTML = orcamentos.map(o => {
+                const data = new Date(o.criado_em);
+                const dataStr = data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                const itens = Array.isArray(o.itens) ? o.itens : [];
+                const resumoItens = itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ') || '-';
+                return `
+                    <div class="table-row" style="grid-template-columns: 1.4fr 2fr 1fr 1.4fr 1fr;">
+                        <div>${dataStr}</div>
+                        <div>${o.nome_cliente || 'Não informado'}</div>
+                        <div title="${resumoItens}">${itens.length} item(ns)</div>
+                        <div>R$ ${parseFloat(o.total || 0).toFixed(2)}</div>
+                        <div style="display:flex; gap:6px;">
+                            <button class="btn btn-secondary btn-small" onclick="verTextoOrcamento(${o.id})">📄</button>
+                            <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarOrcamento(${o.id})">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function verTextoOrcamento(id) {
+            const o = orcamentos.find(x => x.id === id);
+            if (!o) return;
+            document.getElementById('textoOrcamentoFormatado').value = o.texto_formatado || '';
+            document.getElementById('modalTextoOrcamento').classList.add('show');
+        }
+
+        function copiarTextoOrcamento() {
+            const texto = document.getElementById('textoOrcamentoFormatado');
+            texto.select();
+            navigator.clipboard?.writeText(texto.value).catch(() => document.execCommand('copy'));
+        }
+
+        async function deletarOrcamento(id) {
+            if (!confirm('Excluir este orçamento?')) return;
+            try {
+                const res = await fetch(`${API_URL}/orcamentos/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) carregarOrcamentos();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        // ═════════════════════════════════════
+        //  TAREFA 4 — ABA CLIENTES
+        // ═════════════════════════════════════
+        let clientesNegocio = [];
+
+        async function carregarClientesNegocio() {
+            try {
+                const res = await fetch(`${API_URL}/clientes-negocio`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                clientesNegocio = await res.json();
+                exibirClientesNegocio();
+            } catch (err) {
+                console.error('Erro:', err);
+            }
+        }
+
+        function exibirClientesNegocio() {
+            const div = document.getElementById('listaClientesNegocio');
+            if (!clientesNegocio || clientesNegocio.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhum cliente cadastrado.</div>';
+                return;
+            }
+
+            div.innerHTML = clientesNegocio.map(c => {
+                const desde = c.criado_em ? new Date(c.criado_em).toLocaleDateString('pt-BR') : '-';
+                return `
+                    <div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr 1.6fr;">
+                        <div>${c.nome}</div>
+                        <div>${c.telefone || '-'}</div>
+                        <div>${desde}</div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-small" onclick="verHistoricoCliente(${c.id})">📜 Histórico</button>
+                            <button class="btn btn-secondary btn-small" onclick="abrirModalClienteNegocioEditar(${c.id})">✏️</button>
+                            <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarClienteNegocio(${c.id})">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function abrirModalClienteNegocio() {
+            document.getElementById('modalClienteNegocioTitulo').textContent = 'Novo Cliente';
+            document.getElementById('clienteNegocioEditandoId').value = '';
+            document.getElementById('nomeClienteNegocio').value = '';
+            document.getElementById('telefoneClienteNegocio').value = '';
+            document.getElementById('modalClienteNegocio').classList.add('show');
+        }
+
+        function abrirModalClienteNegocioEditar(id) {
+            const c = clientesNegocio.find(x => x.id === id);
+            if (!c) return;
+            document.getElementById('modalClienteNegocioTitulo').textContent = 'Editar Cliente';
+            document.getElementById('clienteNegocioEditandoId').value = c.id;
+            document.getElementById('nomeClienteNegocio').value = c.nome || '';
+            document.getElementById('telefoneClienteNegocio').value = c.telefone || '';
+            document.getElementById('modalClienteNegocio').classList.add('show');
+        }
+
+        async function salvarClienteNegocio() {
+            const editandoId = document.getElementById('clienteNegocioEditandoId').value;
+            const nome = document.getElementById('nomeClienteNegocio').value;
+            const telefone = document.getElementById('telefoneClienteNegocio').value;
+
+            if (!nome) {
+                alert('Preencha o nome do cliente');
+                return;
+            }
+
+            try {
+                const url = editandoId ? `${API_URL}/clientes-negocio/${editandoId}` : `${API_URL}/clientes-negocio`;
+                const method = editandoId ? 'PUT' : 'POST';
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ nome, telefone })
+                });
+
+                if (!res.ok) {
+                    const erro = await res.json().catch(() => ({}));
+                    throw new Error(erro.detail || 'Erro ao salvar');
+                }
+
+                fecharModal('modalClienteNegocio');
+                carregarClientesNegocio();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        async function deletarClienteNegocio(id) {
+            if (!confirm('Excluir este cliente? As vendas e orçamentos antigos ficam no histórico, só o vínculo é removido.')) return;
+            try {
+                const res = await fetch(`${API_URL}/clientes-negocio/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    carregarClientesNegocio();
+                    carregarVendas();
+                    carregarOrcamentos();
+                }
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        async function verHistoricoCliente(id) {
+            const c = clientesNegocio.find(x => x.id === id);
+            document.getElementById('modalHistoricoClienteTitulo').textContent = `Histórico — ${c ? c.nome : ''}`;
+            document.getElementById('listaHistoricoCliente').innerHTML = 'Carregando...';
+            document.getElementById('modalHistoricoCliente').classList.add('show');
+            try {
+                const res = await fetch(`${API_URL}/clientes-negocio/${id}/historico`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                const historico = data.historico || [];
+                if (historico.length === 0) {
+                    document.getElementById('listaHistoricoCliente').innerHTML = '<div style="color:#999;">Nenhum registro ainda.</div>';
+                    return;
+                }
+                document.getElementById('listaHistoricoCliente').innerHTML = historico.map(h => {
+                    const data = new Date(h.criado_em).toLocaleDateString('pt-BR');
+                    if (h.tipo_registro === 'venda') {
+                        return `<div style="padding:8px 0; border-bottom:1px solid #f0f0f0;">💰 ${data} — ${h.produto_nome} (${h.quantidade}) — R$ ${parseFloat(h.valor_total || 0).toFixed(2)}</div>`;
+                    }
+                    return `<div style="padding:8px 0; border-bottom:1px solid #f0f0f0;">🧾 ${data} — Orçamento — R$ ${parseFloat(h.total || 0).toFixed(2)}</div>`;
+                }).join('');
+            } catch (err) {
+                document.getElementById('listaHistoricoCliente').innerHTML = 'Erro ao carregar histórico.';
+            }
+        }
+
+        // ═════════════════════════════════════
+        //  TAREFA 5 — ABA CUSTOS (custos fixos + calculadora)
+        // ═════════════════════════════════════
+        let custosFixos = [];
+
+        async function carregarCustosFixos() {
+            try {
+                const res = await fetch(`${API_URL}/custos-fixos`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                custosFixos = await res.json();
+                exibirCustosFixos();
+            } catch (err) {
+                console.error('Erro:', err);
+            }
+        }
+
+        function exibirCustosFixos() {
+            const div = document.getElementById('listaCustosFixos');
+            const total = custosFixos.reduce((sum, c) => sum + parseFloat(c.valor || 0), 0);
+            document.getElementById('totalCustosFixos').textContent = 'R$ ' + total.toFixed(2);
+
+            if (!custosFixos || custosFixos.length === 0) {
+                div.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">Nenhuma conta fixa cadastrada.</div>';
+                return;
+            }
+
+            div.innerHTML = custosFixos.map(c => `
+                <div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr;">
+                    <div>${c.nome_da_conta}</div>
+                    <div>R$ ${parseFloat(c.valor || 0).toFixed(2)}</div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalCustoFixoEditar(${c.id})">✏️</button>
+                        <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarCustoFixo(${c.id})">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function abrirModalCustoFixo() {
+            document.getElementById('modalCustoFixoTitulo').textContent = 'Nova Conta Fixa';
+            document.getElementById('custoFixoEditandoId').value = '';
+            document.getElementById('nomeCustoFixo').value = '';
+            document.getElementById('valorCustoFixo').value = '';
+            document.getElementById('modalCustoFixo').classList.add('show');
+        }
+
+        function abrirModalCustoFixoEditar(id) {
+            const c = custosFixos.find(x => x.id === id);
+            if (!c) return;
+            document.getElementById('modalCustoFixoTitulo').textContent = 'Editar Conta Fixa';
+            document.getElementById('custoFixoEditandoId').value = c.id;
+            document.getElementById('nomeCustoFixo').value = c.nome_da_conta || '';
+            document.getElementById('valorCustoFixo').value = c.valor || '';
+            document.getElementById('modalCustoFixo').classList.add('show');
+        }
+
+        async function salvarCustoFixo() {
+            const editandoId = document.getElementById('custoFixoEditandoId').value;
+            const nome_da_conta = document.getElementById('nomeCustoFixo').value;
+            const valor = parseFloat(document.getElementById('valorCustoFixo').value);
+
+            if (!nome_da_conta || isNaN(valor)) {
+                alert('Preencha o nome e o valor da conta');
+                return;
+            }
+
+            try {
+                const url = editandoId ? `${API_URL}/custos-fixos/${editandoId}` : `${API_URL}/custos-fixos`;
+                const method = editandoId ? 'PUT' : 'POST';
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ nome_da_conta, valor })
+                });
+
+                if (!res.ok) throw new Error('Erro ao salvar');
+
+                fecharModal('modalCustoFixo');
+                carregarCustosFixos();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        async function deletarCustoFixo(id) {
+            if (!confirm('Excluir esta conta fixa?')) return;
+            try {
+                const res = await fetch(`${API_URL}/custos-fixos/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) carregarCustosFixos();
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
+        }
+
+        function exportarCustosFixosCSV() {
+            baixarArquivo(`${API_URL}/custos-fixos/export.csv`, 'custos-fixos.csv');
+        }
+
+        function exportarCustosFixosExcel() {
+            baixarArquivo(`${API_URL}/custos-fixos/export.excel`, 'custos-fixos.xlsx');
+        }
+
+        function preencherCustoVariavelCalculadora() {
+            const produtoId = document.getElementById('calcProdutoSelect').value;
+            if (!produtoId) return;
+            const p = produtos.find(x => x.id === parseInt(produtoId));
+            if (p) document.getElementById('calcCustoVariavel').value = p.custo_unitario || 0;
+        }
+
+        async function calcularPrecoSugerido() {
+            const produtoId = document.getElementById('calcProdutoSelect').value;
+            const custoVariavel = parseFloat(document.getElementById('calcCustoVariavel').value) || 0;
+            const volumeEsperado = parseFloat(document.getElementById('calcVolumeEsperado').value);
+            const margem = parseFloat(document.getElementById('calcMargem').value);
+
+            if (!volumeEsperado || volumeEsperado <= 0) {
+                alert('Informe o volume de vendas esperado por mês (maior que zero)');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/custos-fixos/calculadora`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        produto_id: produtoId ? parseInt(produtoId) : null,
+                        custo_variavel: custoVariavel,
+                        volume_esperado: volumeEsperado,
+                        margem: isNaN(margem) ? null : margem
+                    })
+                });
+
+                if (!res.ok) throw new Error('Erro ao calcular');
+                const resultado = await res.json();
+
+                document.getElementById('resCustoFixoTotal').textContent = 'R$ ' + parseFloat(resultado.custo_fixo_mensal_total).toFixed(2);
+                document.getElementById('resCustoFixoRateado').textContent = 'R$ ' + parseFloat(resultado.custo_fixo_rateado).toFixed(2);
+                document.getElementById('resCustoTotalUnitario').textContent = 'R$ ' + parseFloat(resultado.custo_total_unitario).toFixed(2);
+                document.getElementById('resMargem').textContent = resultado.margem + '%';
+                document.getElementById('resPrecoSugerido').textContent = 'R$ ' + parseFloat(resultado.preco_sugerido).toFixed(2);
+                document.getElementById('resultadoCalculadora').style.display = 'block';
+            } catch (err) {
+                alert('Erro: ' + err.message);
+            }
         }
 
         function abrirAba(aba) {
@@ -860,12 +1494,31 @@
         }
 
         function abrirModalProduto() {
+            document.getElementById('modalProdutoTitulo').textContent = 'Novo Produto';
+            document.getElementById('produtoEditandoId').value = '';
             document.getElementById('modalProduto').classList.add('show');
             document.getElementById('nomeProduto').value = '';
             document.getElementById('skuProduto').value = '';
             document.getElementById('custoProduto').value = '';
             document.getElementById('precoProduto').value = '';
             document.getElementById('estoqueProduto').value = '';
+            document.getElementById('unidadeProduto').value = 'un';
+        }
+
+        // TAREFA 1 — edição completa do produto (nome, SKU, unidade, custo, preço, estoque)
+        // reaproveitando o mesmo modal de cadastro e o endpoint PUT /produtos/{id} já existente.
+        function abrirModalProdutoEditar(produtoId) {
+            const p = produtos.find(x => x.id === produtoId);
+            if (!p) return;
+            document.getElementById('modalProdutoTitulo').textContent = 'Editar Produto';
+            document.getElementById('produtoEditandoId').value = p.id;
+            document.getElementById('nomeProduto').value = p.nome || '';
+            document.getElementById('skuProduto').value = p.sku || '';
+            document.getElementById('custoProduto').value = p.custo_unitario || 0;
+            document.getElementById('precoProduto').value = p.preco_venda || 0;
+            document.getElementById('estoqueProduto').value = p.estoque_atual || 0;
+            document.getElementById('unidadeProduto').value = p.unidade || 'un';
+            document.getElementById('modalProduto').classList.add('show');
         }
 
         function fecharModalProduto() {
@@ -873,21 +1526,24 @@
         }
 
         async function salvarProduto() {
+            const editandoId = document.getElementById('produtoEditandoId').value;
             const nome = document.getElementById('nomeProduto').value;
             const sku = document.getElementById('skuProduto').value;
             const custo = parseFloat(document.getElementById('custoProduto').value);
             const preco = parseFloat(document.getElementById('precoProduto').value);
             const estoque = parseFloat(document.getElementById('estoqueProduto').value);
             const unidade = document.getElementById('unidadeProduto').value;
-            
+
             if (!nome || !custo || !preco) {
                 alert('Preencha os campos obrigatórios');
                 return;
             }
-            
+
             try {
-                const res = await fetch(`${API_URL}/produtos`, {
-                    method: 'POST',
+                const url = editandoId ? `${API_URL}/produtos/${editandoId}` : `${API_URL}/produtos`;
+                const method = editandoId ? 'PUT' : 'POST';
+                const res = await fetch(url, {
+                    method,
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
@@ -1096,6 +1752,10 @@
         carregarProdutos();
         carregarMateriasPrimas();
         carregarAgendamentos();
+        carregarVendas();
+        carregarOrcamentos();
+        carregarClientesNegocio();
+        carregarCustosFixos();
     </script>
 </body>
 </html>
