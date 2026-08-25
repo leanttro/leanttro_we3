@@ -219,9 +219,28 @@ class ProdutoEditarBody(BaseModel):
     custo_unitario: Optional[float] = None
     preco_venda: Optional[float] = None
 
+class OrcamentoItemBody(BaseModel):
+    produto_id: int
+    quantidade: float
+
+class OrcamentoBody(BaseModel):
+    itens: list[OrcamentoItemBody]
+    desconto_tipo: Optional[str] = None  # "valor" | "percentual" | None
+    desconto_valor: Optional[float] = 0
+    observacoes: Optional[str] = None
+    nome_cliente: Optional[str] = None
+
 # ─────────────────────────────────────────
 #  HELPERS DE NEGÓCIO
 # ─────────────────────────────────────────
+def formatar_moeda(valor: float) -> str:
+    """Formata número no padrão R$ 1.234,56"""
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def formatar_qtd(qtd: float) -> str:
+    """Mostra quantidade sem casas decimais quando é um número inteiro"""
+    return str(int(qtd)) if float(qtd).is_integer() else str(qtd)
+
 def normalizar_numero(remote_jid_ou_numero: str) -> str:
     n = remote_jid_ou_numero.split("@")[0]
     return re.sub(r"\D", "", n)
@@ -1166,6 +1185,33 @@ def criar_tabelas_agendamentos():
     finally:
         conn.close()
 
+def criar_tabelas_orcamentos():
+    """Cria a tabela orcamentos no startup SE ela não existir."""
+    conn = get_conn_raw()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS orcamentos (
+                id              SERIAL PRIMARY KEY,
+                cliente_id      INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                nome_cliente    TEXT,
+                itens           JSONB NOT NULL,
+                subtotal        NUMERIC NOT NULL,
+                desconto_tipo   TEXT NULL,
+                desconto_valor  NUMERIC NULL,
+                total           NUMERIC NOT NULL,
+                texto_formatado TEXT NOT NULL,
+                observacoes     TEXT,
+                criado_em       TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """)
+        conn.commit()
+        print("✅ Tabela orcamentos: OK")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabela orcamentos: {e}")
+    finally:
+        conn.close()
+
 # ─────────────────────────────────────────
 #  LIFESPAN
 # ─────────────────────────────────────────
@@ -1174,6 +1220,7 @@ async def lifespan(app: FastAPI):
     # 1️⃣ Criar tabelas necessárias
     criar_tabelas_resumo_automatico()
     criar_tabelas_agendamentos()
+    criar_tabelas_orcamentos()
     
     # 2️⃣ Testar conexão com banco
     try:
@@ -1699,6 +1746,96 @@ def deletar_agendamento(agendamento_id: int, cliente=Depends(get_current_cliente
     if not agendamento:
         raise HTTPException(status_code=404, detail="Agendamento não encontrado")
     db_exec(conn, "DELETE FROM agendamentos WHERE id = %s", (agendamento_id,))
+    return {"ok": True}
+
+# ═════════════════════════════════════════
+#  ORÇAMENTOS
+# ═════════════════════════════════════════
+@app.post("/orcamentos")
+def criar_orcamento(body: OrcamentoBody, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Monta um orçamento a partir de produtos + quantidade, calcula desconto/total
+    e já gera o texto formatado pronto pra copiar/enviar."""
+    if not body.itens:
+        raise HTTPException(status_code=400, detail="Adicione ao menos um produto")
+
+    itens_detalhados = []
+    subtotal = 0.0
+    for item in body.itens:
+        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                          (item.produto_id, cliente["id"]))
+        if not produto:
+            raise HTTPException(status_code=404, detail=f"Produto {item.produto_id} não encontrado")
+        preco_unitario = float(produto["preco_venda"] or 0)
+        subtotal_item = preco_unitario * item.quantidade
+        subtotal += subtotal_item
+        itens_detalhados.append({
+            "produto_id": produto["id"],
+            "nome": produto["nome"],
+            "quantidade": item.quantidade,
+            "preco_unitario": preco_unitario,
+            "subtotal": subtotal_item,
+        })
+
+    desconto_tipo = body.desconto_tipo if body.desconto_tipo in ("valor", "percentual") else None
+    desconto_valor_informado = float(body.desconto_valor or 0)
+    if desconto_tipo == "percentual":
+        desconto_calculado = subtotal * (desconto_valor_informado / 100)
+    elif desconto_tipo == "valor":
+        desconto_calculado = desconto_valor_informado
+    else:
+        desconto_calculado = 0.0
+    desconto_calculado = min(desconto_calculado, subtotal)  # nunca deixa o total ficar negativo
+    total = subtotal - desconto_calculado
+
+    # ── Monta o texto formatado (pronto pra copiar/enviar no WhatsApp) ──
+    linhas = ["🧾 *Orçamento*"]
+    if cliente.get("nome_negocio"):
+        linhas.append(f"_{cliente['nome_negocio']}_")
+    if body.nome_cliente:
+        linhas.append(f"Para: {body.nome_cliente}")
+    linhas.append("")
+    for item in itens_detalhados:
+        linhas.append(f"▪️ {formatar_qtd(item['quantidade'])}x {item['nome']} — {formatar_moeda(item['subtotal'])}")
+    linhas.append("")
+    linhas.append(f"Subtotal: {formatar_moeda(subtotal)}")
+    if desconto_calculado > 0:
+        if desconto_tipo == "percentual":
+            linhas.append(f"Desconto ({formatar_qtd(desconto_valor_informado)}%): -{formatar_moeda(desconto_calculado)}")
+        else:
+            linhas.append(f"Desconto: -{formatar_moeda(desconto_calculado)}")
+    linhas.append(f"*Total: {formatar_moeda(total)}*")
+    if body.observacoes:
+        linhas.append("")
+        linhas.append(body.observacoes)
+    texto_formatado = "\n".join(linhas)
+
+    registro = db_exec(conn, """
+        INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+    """, (
+        cliente["id"], body.nome_cliente, json.dumps(itens_detalhados), subtotal,
+        desconto_tipo, desconto_calculado, total, texto_formatado, body.observacoes
+    ))
+    return registro
+
+@app.get("/orcamentos")
+def listar_orcamentos(cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Lista o histórico de orçamentos gerados"""
+    return db_all(conn, """
+        SELECT id, nome_cliente, itens, subtotal, desconto_tipo, desconto_valor, total, texto_formatado, observacoes, criado_em
+        FROM orcamentos
+        WHERE cliente_id = %s
+        ORDER BY criado_em DESC
+    """, (cliente["id"],))
+
+@app.delete("/orcamentos/{orcamento_id}")
+def deletar_orcamento(orcamento_id: int, cliente=Depends(get_current_cliente), conn=Depends(get_db)):
+    """Remove um orçamento do histórico"""
+    orcamento = db_one(conn, "SELECT * FROM orcamentos WHERE id = %s AND cliente_id = %s",
+                        (orcamento_id, cliente["id"]))
+    if not orcamento:
+        raise HTTPException(status_code=404, detail="Orçamento não encontrado")
+    db_exec(conn, "DELETE FROM orcamentos WHERE id = %s", (orcamento_id,))
     return {"ok": True}
 
 # ═════════════════════════════════════════
