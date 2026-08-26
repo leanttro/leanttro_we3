@@ -1148,6 +1148,28 @@ async def enviar_whatsapp(destino: str, texto: str):
         except Exception as e:
             print(f"⚠️ Erro ao enviar WhatsApp: {e}")
 
+async def notificar_admin_novo_orcamento(conn, cliente_id: int, cliente_negocio_nome: str, produto_nome: str, quantidade: str, total_formatado: str, numero_cliente: str):
+    """Envia notificação para todos os números autorizados do cliente sobre novo orçamento."""
+    try:
+        numeros_admin = db_all(conn, "SELECT numero FROM numeros_autorizados WHERE cliente_id = %s AND ativo = TRUE", (cliente_id,))
+        if not numeros_admin:
+            return
+        
+        mensagem = (
+            f"📋 *NOVO ORÇAMENTO* 🔔\n\n"
+            f"👤 Cliente: {cliente_negocio_nome}\n"
+            f"📱 Telefone: {numero_cliente}\n"
+            f"🛍️ Produto: {produto_nome}\n"
+            f"📦 Quantidade: {quantidade}\n"
+            f"💰 Total: {total_formatado}\n\n"
+            f"✅ Verifique no admin para confirmar e enviar ao cliente."
+        )
+        
+        for admin in numeros_admin:
+            await enviar_whatsapp(admin["numero"], mensagem)
+    except Exception as e:
+        print(f"⚠️ Erro ao notificar admin: {e}")
+
 # ─────────────────────────────────────────
 #  MÁQUINA DE ESTADOS — modo formulário
 # ─────────────────────────────────────────
@@ -1294,6 +1316,17 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
                 INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, total, texto_formatado, cliente_negocio_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (cliente_id, cliente_negocio["nome"], itens_json, total, total, texto_formatado, cliente_negocio["id"]))
+
+            # Notificar admin sobre novo orçamento
+            asyncio.create_task(notificar_admin_novo_orcamento(
+                conn, 
+                cliente_id, 
+                cliente_negocio["nome"], 
+                dados.get("produto_nome", ""), 
+                formatar_qtd(dados.get("quantidade") or 0),
+                formatar_moeda(total),
+                numero
+            ))
 
             salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
             return "✅ Orçamento enviado! Em breve alguém confirma com você.\n\n" + MENU_CLIENTE_FINAL
