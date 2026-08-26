@@ -1246,7 +1246,8 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
                                          {"produtos_ids": [p["id"] for p in produtos]})
             return montar_lista_numerada(
                 produtos, "📋 *Pedir orçamento*\nQual produto/serviço você quer?",
-                rodape="Responda com o número.", mostrar_preco=True
+                rodape="Responda com o número. Pra pedir mais de um, separe por vírgula (ex: 1,3).",
+                mostrar_preco=True
             )
 
         if escolha == "3":
@@ -1258,25 +1259,30 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
 
         return "Não entendi. " + MENU_CLIENTE_FINAL
 
-    # ── Pedido de orçamento: escolheu o produto, agora pede a quantidade ──
+    # ── Pedido de orçamento: escolheu o(s) produto(s), agora pede a quantidade de cada um ──
     if etapa == "cf_orc_escolha_produto":
         produtos_ids = dados.get("produtos_ids", [])
-        try:
-            idx = int(texto.strip())
-            assert 1 <= idx <= len(produtos_ids)
-        except (ValueError, AssertionError):
-            return f"Manda só o número do produto (1 a {len(produtos_ids)}), ou *menu* para voltar."
-        produto = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
-                          (produtos_ids[idx - 1], cliente_id))
-        if not produto:
+        indices = parse_selecao_multipla(texto, len(produtos_ids))
+        if not indices:
+            return (f"Manda o número do produto (1 a {len(produtos_ids)}). "
+                     "Pra pedir mais de um, separe por vírgula, ex: 1,3.")
+        escolhidos_ids = [produtos_ids[i - 1] for i in indices]
+        primeiro = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                           (escolhidos_ids[0], cliente_id))
+        if not primeiro:
             salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
             return "Esse produto não está mais disponível.\n\n" + MENU_CLIENTE_FINAL
-        salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_quantidade",
-                                     {"produto_id": produto["id"], "produto_nome": produto["nome"],
-                                      "preco_unitario": float(produto["preco_venda"] or 0)})
-        return f"Quantas unidades de *{produto['nome']}* você quer?"
+        salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_quantidade", {
+            "fila_produtos_ids": escolhidos_ids[1:],
+            "carrinho": [],
+            "produto_id": primeiro["id"],
+            "produto_nome": primeiro["nome"],
+            "preco_unitario": float(primeiro["preco_venda"] or 0),
+        })
+        return f"Quantas unidades de *{primeiro['nome']}* você quer?"
 
-    # ── Pedido de orçamento: informou quantidade, monta e mostra o resumo ──
+    # ── Pedido de orçamento: informou quantidade de um item; avança pro próximo
+    # item da fila (se houver) ou monta e mostra o resumo com tudo que já foi pedido ──
     if etapa == "cf_orc_quantidade":
         try:
             quantidade = float(texto.strip().replace(",", "."))
@@ -1284,14 +1290,36 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
         except (ValueError, AssertionError):
             return "Manda só a quantidade (um número), por favor."
         preco_unitario = float(dados.get("preco_unitario") or 0)
-        total = quantidade * preco_unitario
-        dados["quantidade"] = quantidade
+        dados.setdefault("carrinho", []).append({
+            "produto_id": dados["produto_id"], "produto_nome": dados["produto_nome"],
+            "quantidade": quantidade, "preco_unitario": preco_unitario,
+        })
+
+        fila = dados.get("fila_produtos_ids", [])
+        while fila:
+            proximo_id = fila.pop(0)
+            proximo = db_one(conn, "SELECT * FROM produtos WHERE id = %s AND cliente_id = %s",
+                              (proximo_id, cliente_id))
+            if proximo:
+                dados["fila_produtos_ids"] = fila
+                dados["produto_id"] = proximo["id"]
+                dados["produto_nome"] = proximo["nome"]
+                dados["preco_unitario"] = float(proximo["preco_venda"] or 0)
+                salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_quantidade", dados)
+                return f"Quantas unidades de *{proximo['nome']}* você quer?"
+        dados["fila_produtos_ids"] = fila
+
+        carrinho = dados.get("carrinho", [])
+        total = sum(item["quantidade"] * item["preco_unitario"] for item in carrinho)
         dados["total"] = total
         salvar_sessao_cliente_final(conn, cliente_id, numero, "cf_orc_confirmar", dados)
+        linhas_itens = "\n".join(
+            f"{item['produto_nome']} — {formatar_qtd(item['quantidade'])} un. × {formatar_moeda(item['preco_unitario'])}"
+            for item in carrinho
+        )
         return (
             f"🧾 *Resumo do orçamento*\n\n"
-            f"{dados['produto_nome']} — {formatar_qtd(quantidade)} un.\n"
-            f"Valor unitário: {formatar_moeda(preco_unitario)}\n"
+            f"{linhas_itens}\n\n"
             f"*Total: {formatar_moeda(total)}*\n\n"
             "Confirma o envio desse orçamento? (sim/não)"
         )
@@ -1307,16 +1335,23 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
                     VALUES (%s, %s, %s) RETURNING *
                 """, (cliente_id, f"Visitante {numero}", numero))
 
+            carrinho = dados.get("carrinho", [])
             itens_json = json.dumps([{
-                "produto_id": dados.get("produto_id"),
-                "nome": dados.get("produto_nome"),
-                "quantidade": dados.get("quantidade"),
-                "preco_unitario": dados.get("preco_unitario"),
-            }])
+                "produto_id": item.get("produto_id"),
+                "nome": item.get("produto_nome"),
+                "quantidade": item.get("quantidade"),
+                "preco_unitario": item.get("preco_unitario"),
+            } for item in carrinho])
             total = float(dados.get("total") or 0)
+            linhas_itens = "\n".join(
+                f"{item['produto_nome']} x{formatar_qtd(item['quantidade'])} = "
+                f"{formatar_moeda(item['quantidade'] * item['preco_unitario'])}"
+                for item in carrinho
+            )
             texto_formatado = (
                 f"🧾 Orçamento — {cliente.get('nome_negocio','')}\n"
-                f"{dados.get('produto_nome')} x{formatar_qtd(dados.get('quantidade') or 0)} = {formatar_moeda(total)}"
+                f"{linhas_itens}\n"
+                f"Total: {formatar_moeda(total)}"
             )
             db_exec(conn, """
                 INSERT INTO orcamentos (cliente_id, nome_cliente, itens, subtotal, total, texto_formatado, cliente_negocio_id)
@@ -1327,12 +1362,15 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
             
             # Notificar admin sobre novo orçamento (não-bloqueante)
             try:
+                produtos_resumo = ", ".join(
+                    f"{item['produto_nome']} (x{formatar_qtd(item['quantidade'])})" for item in carrinho
+                )
                 asyncio.create_task(notificar_admin_novo_orcamento(
                     conn, 
                     cliente_id, 
                     cliente_negocio["nome"], 
-                    dados.get("produto_nome", ""), 
-                    formatar_qtd(dados.get("quantidade") or 0),
+                    produtos_resumo,
+                    f"{len(carrinho)} item(ns)",
                     formatar_moeda(total),
                     numero
                 ))
