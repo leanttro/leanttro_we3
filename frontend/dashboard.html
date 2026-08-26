@@ -83,7 +83,7 @@
         }
 
         .brand img {
-            height: 46px;
+            height: 76px;
             width: auto;
             display: block;
         }
@@ -759,11 +759,16 @@
            ─────────────────────────────────────── */
         @media (max-width: 768px) {
             .topbar {
-                padding: 14px 16px;
+                padding: 16px 16px 14px;
+            }
+
+            .topbar-inner {
+                flex-direction: column;
+                gap: 10px;
             }
 
             .brand img {
-                height: 36px;
+                height: 60px;
             }
 
             .topbar-actions {
@@ -771,7 +776,7 @@
                 transform: none;
                 display: flex;
                 justify-content: center;
-                margin-top: 10px;
+                width: 100%;
             }
 
             .container {
