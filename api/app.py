@@ -1142,11 +1142,13 @@ async def enviar_whatsapp(destino: str, texto: str):
     # essencial repassar o JID original (com @lid) quando ele existir, em vez
     # de normalizar para dígitos antes de responder.
     payload = {"number": destino, "message": texto}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=10) as client:
         try:
-            await client.post(f"{BAILEYS_URL}/disparar", json=payload)
+            await asyncio.wait_for(client.post(f"{BAILEYS_URL}/disparar", json=payload), timeout=8)
+        except asyncio.TimeoutError:
+            print(f"⚠️ Timeout ao enviar WhatsApp para {destino}")
         except Exception as e:
-            print(f"⚠️ Erro ao enviar WhatsApp: {e}")
+            print(f"⚠️ Erro ao enviar WhatsApp para {destino}: {e}")
 
 async def notificar_admin_novo_orcamento(conn, cliente_id: int, cliente_negocio_nome: str, produto_nome: str, quantidade: str, total_formatado: str, numero_cliente: str):
     """Envia notificação para todos os números autorizados do cliente sobre novo orçamento."""
@@ -1165,8 +1167,12 @@ async def notificar_admin_novo_orcamento(conn, cliente_id: int, cliente_negocio_
             f"✅ Verifique no admin para confirmar e enviar ao cliente."
         )
         
-        for admin in numeros_admin:
-            await enviar_whatsapp(admin["numero"], mensagem)
+        payload = {"number": numeros_admin[0]["numero"], "message": mensagem}
+        async with httpx.AsyncClient(timeout=5) as client:
+            try:
+                await asyncio.wait_for(client.post(f"{BAILEYS_URL}/disparar", json=payload), timeout=5)
+            except Exception as e:
+                print(f"⚠️ Erro ao enviar notificação: {e}")
     except Exception as e:
         print(f"⚠️ Erro ao notificar admin: {e}")
 
@@ -1317,18 +1323,21 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (cliente_id, cliente_negocio["nome"], itens_json, total, total, texto_formatado, cliente_negocio["id"]))
 
-            # Notificar admin sobre novo orçamento
-            asyncio.create_task(notificar_admin_novo_orcamento(
-                conn, 
-                cliente_id, 
-                cliente_negocio["nome"], 
-                dados.get("produto_nome", ""), 
-                formatar_qtd(dados.get("quantidade") or 0),
-                formatar_moeda(total),
-                numero
-            ))
-
             salvar_sessao_cliente_final(conn, cliente_id, numero, "menu_cliente_final", {})
+            
+            # Notificar admin sobre novo orçamento (não-bloqueante)
+            try:
+                asyncio.create_task(notificar_admin_novo_orcamento(
+                    conn, 
+                    cliente_id, 
+                    cliente_negocio["nome"], 
+                    dados.get("produto_nome", ""), 
+                    formatar_qtd(dados.get("quantidade") or 0),
+                    formatar_moeda(total),
+                    numero
+                ))
+            except Exception as e:
+                print(f"⚠️ Erro ao criar task de notificação: {e}")
             return "✅ Orçamento enviado! Em breve alguém confirma com você.\n\n" + MENU_CLIENTE_FINAL
 
         if texto_low in ("não", "nao", "n"):
