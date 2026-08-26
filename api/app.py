@@ -1150,6 +1150,37 @@ async def enviar_whatsapp(destino: str, texto: str):
         except Exception as e:
             print(f"⚠️ Erro ao enviar WhatsApp para {destino}: {e}")
 
+async def notificar_admin_mensagem_cliente_final(conn, cliente_id: int, numero_cliente: str, texto_mensagem: str):
+    """Envia para todos os números autorizados do cliente (dona/atendente) a mensagem
+    que o cliente final digitou na opção 3 (Falar com atendente), pra ela conseguir ver
+    e responder direto pelo WhatsApp normal, sem precisar abrir o painel. Não-bloqueante
+    (chamado via asyncio.create_task) e nunca lança exceção pro chamador."""
+    try:
+        numeros_admin = db_all(conn, "SELECT numero FROM numeros_autorizados WHERE cliente_id = %s AND ativo = TRUE", (cliente_id,))
+        if not numeros_admin:
+            return
+
+        cliente_negocio = db_one(conn, "SELECT nome FROM clientes_negocio WHERE cliente_id = %s AND telefone = %s",
+                                  (cliente_id, numero_cliente))
+        nome_cliente = cliente_negocio["nome"] if cliente_negocio else f"Visitante {numero_cliente}"
+
+        mensagem = (
+            f"💬 *NOVA MENSAGEM DO CLIENTE* 🔔\n\n"
+            f"👤 Cliente: {nome_cliente}\n"
+            f"📱 Telefone: {numero_cliente}\n\n"
+            f"📝 Mensagem:\n{texto_mensagem}\n\n"
+            f"✅ Pode responder direto por aqui, no WhatsApp normal."
+        )
+
+        payload = {"number": numeros_admin[0]["numero"], "message": mensagem}
+        async with httpx.AsyncClient(timeout=5) as client:
+            try:
+                await asyncio.wait_for(client.post(f"{BAILEYS_URL}/disparar", json=payload), timeout=5)
+            except Exception as e:
+                print(f"⚠️ Erro ao enviar notificação de mensagem do cliente final: {e}")
+    except Exception as e:
+        print(f"⚠️ Erro ao notificar admin sobre mensagem do cliente final: {e}")
+
 async def notificar_admin_novo_orcamento(conn, cliente_id: int, cliente_negocio_nome: str, produto_nome: str, quantidade: str, total_formatado: str, numero_cliente: str):
     """Envia notificação para todos os números autorizados do cliente sobre novo orçamento."""
     try:
@@ -1388,6 +1419,13 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
     # fica registrada como orçamento pendente/observação; a dona lê pelo WhatsApp
     # normal, já que a conversa continua no mesmo número. Não trava o visitante. ──
     if etapa == "cf_aguardando_humano":
+        # Encaminha a mensagem do visitante pro WhatsApp da dona/atendente (não-bloqueante,
+        # igual à notificação de orçamento — não atrasa a resposta pro cliente final e evita
+        # a mensagem ficar "carregando" no WhatsApp).
+        try:
+            asyncio.create_task(notificar_admin_mensagem_cliente_final(conn, cliente_id, numero, texto))
+        except Exception as e:
+            print(f"⚠️ Erro ao criar task de notificação de mensagem do cliente final: {e}")
         return "Recebido! Um atendente vai te responder por aqui. Digite *menu* se quiser ver as opções de novo."
 
     # fallback: qualquer etapa desconhecida volta pro menu
