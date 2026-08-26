@@ -3,273 +3,459 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Estoque WPP</title>
+    <title>Atende by Leanttro — Painel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --purple-900: #2E1F8F;
+            --purple-700: #4B2FE0;
+            --purple-600: #5B3FEC;
+            --purple-500: #6C4CF1;
+            --purple-100: #EFEBFF;
+            --purple-50:  #F7F5FF;
+            --green: #25D366;
+            --green-dark: #128C7E;
+            --ink: #1D1D1F;
+            --ink-soft: #6E6E76;
+            --ink-faint: #9A9AA2;
+            --line: #EAEAEF;
+            --bg: #F5F5F8;
+            --surface: #FFFFFF;
+            --red: #E0433F;
+            --red-bg: #FDECEC;
+            --amber: #C98A1B;
+            --amber-bg: #FBF1DD;
+            --radius-xl: 26px;
+            --radius-lg: 20px;
+            --radius-md: 14px;
+            --radius-sm: 10px;
+            --shadow-sm: 0 1px 3px rgba(28,20,60,0.06), 0 1px 2px rgba(28,20,60,0.05);
+            --shadow-md: 0 8px 24px rgba(28,20,60,0.08);
+            --shadow-lg: 0 16px 40px rgba(28,20,60,0.12);
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
+        html, body {
+            overflow-x: hidden;
+            max-width: 100%;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f7fa;
-            color: #333;
+            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.01em;
         }
-        
+
+        /* ───────────────────────────────────────
+           HEADER
+           ─────────────────────────────────────── */
         .topbar {
-            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-            color: white;
-            padding: 20px 30px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--line);
+            padding: 18px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 500;
+        }
+
+        .topbar-inner {
+            max-width: 1400px;
+            margin: 0 auto;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            justify-content: center;
+            position: relative;
         }
-        
-        .topbar h1 {
-            font-size: 24px;
-        }
-        
-        .topbar-actions {
+
+        .brand {
             display: flex;
-            gap: 15px;
+            align-items: center;
+            justify-content: center;
         }
-        
+
+        .brand img {
+            height: 46px;
+            width: auto;
+            display: block;
+        }
+
+        .topbar-actions {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        /* ───────────────────────────────────────
+           BOTÕES
+           ─────────────────────────────────────── */
         .btn {
-            padding: 10px 20px;
+            padding: 11px 20px;
             border: none;
-            border-radius: 6px;
+            border-radius: 999px;
             cursor: pointer;
-            font-size: 14px;
+            font-family: inherit;
+            font-size: 13.5px;
             font-weight: 600;
-            transition: all 0.3s;
+            letter-spacing: -0.01em;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
         }
-        
+
+        .btn:active {
+            transform: scale(0.97);
+        }
+
+        .btn svg { flex-shrink: 0; }
+
         .btn-primary {
-            background: white;
-            color: #667eea;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        }
-        
-        .btn-danger {
-            background: rgba(255,255,255,0.2);
+            background: var(--ink);
             color: white;
         }
-        
+
+        .btn-primary:hover {
+            opacity: 0.85;
+        }
+
+        .btn-danger {
+            background: var(--red-bg);
+            color: var(--red);
+        }
+
         .btn-danger:hover {
-            background: rgba(255,255,255,0.3);
+            background: #FBDCDA;
         }
 
         .btn-secondary {
-            background: #667eea;
-            color: white;
+            background: var(--purple-50);
+            color: var(--purple-700);
         }
 
         .btn-secondary:hover {
-            background: #5568d3;
+            background: var(--purple-100);
         }
 
         .btn-success {
-            background: #51cf66;
+            background: var(--green);
             color: white;
         }
 
         .btn-success:hover {
-            background: #40c057;
+            background: var(--green-dark);
         }
-        
+
+        .btn-ghost {
+            background: var(--bg);
+            color: var(--ink-soft);
+        }
+
+        .btn-ghost:hover {
+            background: var(--line);
+        }
+
+        .btn-small {
+            padding: 8px 14px;
+            font-size: 12.5px;
+        }
+
+        .btn-icon {
+            padding: 8px;
+            border-radius: 999px;
+            width: 34px;
+            height: 34px;
+            justify-content: center;
+        }
+
+        /* ───────────────────────────────────────
+           LAYOUT
+           ─────────────────────────────────────── */
         .container {
             max-width: 1400px;
             margin: 0 auto;
-            padding: 30px 20px;
+            padding: 28px 24px 60px;
         }
-        
+
         .grid-2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 30px;
+            gap: 16px;
+            margin-bottom: 28px;
         }
-        
+
         .grid-3 {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            margin-bottom: 30px;
+            gap: 16px;
+            margin-bottom: 28px;
         }
-        
+
         .card {
-            background: white;
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            transition: all 0.3s;
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--line);
+            transition: box-shadow 0.2s ease, transform 0.2s ease;
         }
-        
+
         .card:hover {
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+            box-shadow: var(--shadow-md);
         }
-        
+
         .card h2 {
-            font-size: 14px;
-            color: #999;
+            font-size: 12.5px;
+            color: var(--ink-soft);
             margin-bottom: 10px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.06em;
         }
-        
+
         .card .value {
-            font-size: 32px;
-            color: #667eea;
-            font-weight: bold;
-            margin-bottom: 10px;
+            font-size: 30px;
+            color: var(--purple-700);
+            font-weight: 700;
+            margin-bottom: 6px;
+            letter-spacing: -0.02em;
         }
-        
+
         .card .subtext {
             font-size: 12px;
-            color: #999;
+            color: var(--ink-faint);
         }
-        
+
         .card.warning {
-            border-left: 4px solid #ff6b6b;
+            border-left: 4px solid var(--red);
         }
-        
+
         .card.warning .value {
-            color: #ff6b6b;
+            color: var(--red);
         }
-        
+
         .card.success {
-            border-left: 4px solid #51cf66;
+            border-left: 4px solid var(--green);
         }
-        
+
         .card.success .value {
-            color: #51cf66;
+            color: var(--green-dark);
         }
-        
+
         .section-title {
-            font-size: 20px;
-            color: #333;
-            margin-bottom: 20px;
-            font-weight: 600;
+            font-size: 19px;
+            color: var(--ink);
+            margin-bottom: 18px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
         }
-        
+
+        .section-title-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* ───────────────────────────────────────
+           MANUAL DE USO (lâmpada)
+           ─────────────────────────────────────── */
+        .info-tip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--purple-50);
+            color: var(--purple-600);
+            cursor: pointer;
+            flex-shrink: 0;
+            border: none;
+            outline: none;
+        }
+
+        .info-tip svg {
+            width: 15px;
+            height: 15px;
+        }
+
+        .info-tip:hover,
+        .info-tip:focus,
+        .info-tip.open {
+            background: var(--purple-600);
+            color: white;
+        }
+
+        .info-tip-bubble {
+            display: none;
+            position: absolute;
+            top: 34px;
+            left: 0;
+            z-index: 50;
+            width: 250px;
+            background: var(--ink);
+            color: white;
+            font-size: 12.5px;
+            font-weight: 500;
+            line-height: 1.5;
+            letter-spacing: 0;
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .info-tip-bubble b {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 3px;
+            color: var(--purple-100);
+        }
+
+        .info-tip:hover .info-tip-bubble,
+        .info-tip:focus .info-tip-bubble,
+        .info-tip.open .info-tip-bubble {
+            display: block;
+        }
+
+        @media (max-width: 480px) {
+            .info-tip-bubble {
+                left: auto;
+                right: 0;
+                width: 220px;
+            }
+        }
+
+        /* ───────────────────────────────────────
+           TABELAS
+           ─────────────────────────────────────── */
         .table-container {
-            background: white;
-            border-radius: 12px;
+            background: var(--surface);
+            border-radius: var(--radius-lg);
             overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            margin-bottom: 30px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--line);
+            margin-bottom: 28px;
         }
-        
+
         .table-header {
             display: grid;
             grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
             gap: 15px;
-            padding: 15px 20px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e0e0e0;
-            font-weight: 600;
-            font-size: 13px;
-            color: #666;
+            padding: 16px 22px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--line);
+            font-weight: 700;
+            font-size: 11.5px;
+            color: var(--ink-soft);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.06em;
         }
-        
+
         .table-row {
             display: grid;
             grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
             gap: 15px;
-            padding: 15px 20px;
-            border-bottom: 1px solid #f0f0f0;
+            padding: 16px 22px;
+            border-bottom: 1px solid var(--line);
             align-items: center;
+            font-size: 14px;
         }
-        
+
         .table-row:last-child {
             border-bottom: none;
         }
-        
+
         .table-row:hover {
-            background: #f9f9f9;
+            background: var(--purple-50);
         }
 
         .editable-cell {
             cursor: pointer;
             padding: 5px 8px;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             position: relative;
         }
 
         .editable-cell:hover {
-            background: #e8eef7;
+            background: var(--purple-100);
         }
 
         .editable-cell input {
             width: 100%;
             padding: 5px 8px;
-            border: 1px solid #667eea;
-            border-radius: 4px;
+            border: 1.5px solid var(--purple-600);
+            border-radius: var(--radius-sm);
             font-size: 14px;
+            font-family: inherit;
         }
-        
+
         .badge {
             display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 11.5px;
+            font-weight: 700;
         }
-        
+
         .badge-low {
-            background: #ffe0e0;
-            color: #c33;
+            background: var(--red-bg);
+            color: var(--red);
         }
-        
+
         .badge-ok {
-            background: #e0f2fe;
-            color: #0369a1;
+            background: #E7F9EC;
+            color: #1E8E4C;
         }
-        
+
         .filters {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             margin-bottom: 20px;
             flex-wrap: wrap;
             align-items: center;
         }
-        
+
         .filters input,
         .filters select {
-            padding: 8px 12px;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
+            padding: 10px 14px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
             font-size: 14px;
+            font-family: inherit;
+            background: var(--surface);
         }
-        
+
         .filters input:focus,
         .filters select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--purple-600);
         }
-        
+
         .export-buttons {
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            flex-wrap: wrap;
         }
-        
-        .btn-small {
-            padding: 8px 16px;
-            font-size: 13px;
-        }
-        
+
+        /* ───────────────────────────────────────
+           MODAIS
+           ─────────────────────────────────────── */
         .modal {
             display: none;
             position: fixed;
@@ -277,107 +463,122 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0,0,0,0.5);
+            background: rgba(20,15,40,0.45);
+            backdrop-filter: blur(4px);
             z-index: 1000;
             justify-content: center;
             align-items: center;
         }
-        
+
         .modal.show {
             display: flex;
         }
-        
+
         .modal-content {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            padding: 28px;
             max-width: 500px;
             width: 90%;
             max-height: 90vh;
             overflow-y: auto;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            box-shadow: var(--shadow-lg);
         }
-        
+
         .modal-header {
-            font-size: 20px;
-            font-weight: 600;
+            font-size: 19px;
+            font-weight: 700;
             margin-bottom: 20px;
-            color: #333;
+            color: var(--ink);
+            letter-spacing: -0.01em;
         }
-        
+
         .modal-body {
             margin-bottom: 20px;
         }
-        
+
         .form-group {
             margin-bottom: 15px;
         }
-        
+
         .form-group label {
             display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: #333;
+            margin-bottom: 7px;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--ink-soft);
         }
-        
+
         .form-group input,
         .form-group select,
         .form-group textarea {
             width: 100%;
-            padding: 10px;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
+            padding: 11px 13px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
             font-size: 14px;
             font-family: inherit;
+            background: var(--bg);
         }
-        
+
         .form-group textarea {
             resize: vertical;
             min-height: 80px;
         }
-        
+
         .form-group input:focus,
         .form-group select:focus,
         .form-group textarea:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+            border-color: var(--purple-600);
+            background: var(--surface);
+            box-shadow: 0 0 0 3px var(--purple-100);
         }
-        
+
         .modal-footer {
             display: flex;
             gap: 10px;
             justify-content: flex-end;
         }
-        
+
+        /* ───────────────────────────────────────
+           ABAS
+           ─────────────────────────────────────── */
         .tabs {
             display: flex;
-            gap: 20px;
-            border-bottom: 2px solid #e0e0e0;
-            margin-bottom: 30px;
+            gap: 6px;
+            border-bottom: none;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 6px;
+            margin-bottom: 28px;
             overflow-x: auto;
             overflow-y: hidden;
             -webkit-overflow-scrolling: touch;
-            scrollbar-width: thin;
+            scrollbar-width: none;
         }
+
+        .tabs::-webkit-scrollbar { display: none; }
 
         .tab-btn {
             background: none;
             border: none;
-            padding: 10px 0;
-            font-size: 16px;
+            padding: 10px 18px;
+            font-family: inherit;
+            font-size: 13.5px;
             font-weight: 600;
             cursor: pointer;
-            color: #999;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s;
+            color: var(--ink-soft);
+            border-radius: 999px;
+            transition: all 0.2s ease;
             white-space: nowrap;
             flex-shrink: 0;
         }
 
         .tab-btn.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            color: white;
+            background: var(--ink);
         }
 
         .tab-content {
@@ -389,14 +590,15 @@
         }
 
         .agendamento-card {
-            background: #f9f9f9;
-            border-left: 4px solid #667eea;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 6px;
+            background: var(--bg);
+            border-left: 4px solid var(--purple-600);
+            padding: 16px 18px;
+            margin-bottom: 12px;
+            border-radius: var(--radius-md);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 12px;
         }
 
         .agendamento-info {
@@ -405,30 +607,32 @@
 
         .agendamento-info strong {
             display: block;
-            color: #333;
+            color: var(--ink);
             margin-bottom: 5px;
+            font-weight: 700;
         }
 
         .agendamento-info small {
-            color: #999;
+            color: var(--ink-faint);
+            font-size: 12.5px;
         }
 
         .agendamento-actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
 
         .agenda-toolbar {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 15px;
+            gap: 10px;
+            margin-bottom: 16px;
         }
 
         .agenda-titulo-periodo {
-            font-size: 17px;
-            font-weight: 600;
-            color: #333;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--ink);
             text-transform: capitalize;
             min-width: 180px;
         }
@@ -441,16 +645,18 @@
 
         .calendario-cabecalho {
             text-align: center;
-            font-weight: 600;
-            color: #667eea;
-            font-size: 13px;
+            font-weight: 700;
+            color: var(--purple-600);
+            font-size: 12px;
             padding: 6px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         .calendario-dia-cell {
-            background: #f9f9f9;
-            border: 1px solid #eee;
-            border-radius: 6px;
+            background: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
             min-height: 90px;
             padding: 6px;
             cursor: pointer;
@@ -458,7 +664,7 @@
         }
 
         .calendario-dia-cell:hover {
-            background: #f0f4ff;
+            background: var(--purple-50);
         }
 
         .calendario-dia-cell.fora-mes {
@@ -466,22 +672,23 @@
         }
 
         .calendario-dia-cell.dia-hoje {
-            border: 2px solid #667eea;
+            border: 2px solid var(--purple-600);
         }
 
         .calendario-dia-num {
-            font-size: 13px;
-            font-weight: 600;
-            color: #555;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--ink-soft);
             margin-bottom: 4px;
         }
 
         .calendario-compromisso-chip {
-            background: #667eea;
+            background: var(--purple-600);
             color: white;
-            font-size: 11px;
+            font-size: 10.5px;
+            font-weight: 600;
             padding: 2px 6px;
-            border-radius: 4px;
+            border-radius: 5px;
             margin-bottom: 3px;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -490,7 +697,7 @@
         }
 
         .calendario-compromisso-chip.cancelado {
-            background: #bbb;
+            background: var(--ink-faint);
             text-decoration: line-through;
         }
 
@@ -501,33 +708,33 @@
         }
 
         .calendario-dia-semana {
-            background: #f9f9f9;
-            border: 1px solid #eee;
-            border-radius: 6px;
+            background: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
             min-height: 200px;
             padding: 8px;
         }
 
         .calendario-dia-semana.dia-hoje {
-            border: 2px solid #667eea;
+            border: 2px solid var(--purple-600);
         }
 
         .calendario-dia-semana-header {
-            font-size: 13px;
-            font-weight: 600;
-            color: #555;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--ink-soft);
             margin-bottom: 8px;
             cursor: pointer;
             text-transform: capitalize;
         }
 
         .calendario-vazio {
-            color: #ccc;
-            font-size: 12px;
+            color: var(--ink-faint);
+            font-size: 11.5px;
         }
 
         .calendario-dia-view .agendamento-card {
-            border-left-color: #667eea;
+            border-left-color: var(--purple-600);
         }
 
         @media (max-width: 768px) {
@@ -544,30 +751,31 @@
         #loading {
             text-align: center;
             padding: 20px;
-            color: #999;
+            color: var(--ink-faint);
         }
 
         /* ───────────────────────────────────────
-           RESPONSIVO — MOBILE
+           RESPONSIVO — MOBILE (prioridade)
            ─────────────────────────────────────── */
-        html, body {
-            overflow-x: hidden;
-            max-width: 100%;
-        }
-
         @media (max-width: 768px) {
             .topbar {
-                padding: 15px 16px;
-                flex-wrap: wrap;
-                gap: 10px;
+                padding: 14px 16px;
             }
 
-            .topbar h1 {
-                font-size: 18px;
+            .brand img {
+                height: 36px;
+            }
+
+            .topbar-actions {
+                position: static;
+                transform: none;
+                display: flex;
+                justify-content: center;
+                margin-top: 10px;
             }
 
             .container {
-                padding: 16px 12px;
+                padding: 18px 12px 48px;
             }
 
             .grid-2,
@@ -600,16 +808,18 @@
 
             .export-buttons .btn {
                 flex: 1 1 auto;
+                justify-content: center;
             }
 
             .tabs {
-                gap: 12px;
+                gap: 4px;
                 margin-bottom: 20px;
-                padding-bottom: 4px;
+                border-radius: var(--radius-lg);
             }
 
             .tab-btn {
-                font-size: 14px;
+                font-size: 13px;
+                padding: 9px 14px;
             }
 
             /* Tabelas viram cartões empilhados: cada .table-row passa a ter
@@ -623,7 +833,7 @@
                 display: grid !important;
                 grid-template-columns: 1fr !important;
                 gap: 4px;
-                padding: 14px 16px;
+                padding: 16px;
             }
 
             .table-row > div {
@@ -631,30 +841,31 @@
                 justify-content: space-between;
                 align-items: center;
                 gap: 10px;
-                padding: 4px 0;
+                padding: 5px 0;
             }
 
             .table-row > div[data-label]::before {
                 content: attr(data-label);
-                font-size: 11px;
+                font-size: 10.5px;
                 font-weight: 700;
-                color: #999;
+                color: var(--ink-faint);
                 text-transform: uppercase;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.05em;
                 flex-shrink: 0;
             }
 
             .table-row > div:last-child {
                 justify-content: flex-end;
-                border-top: 1px solid #f0f0f0;
+                border-top: 1px solid var(--line);
                 margin-top: 6px;
                 padding-top: 10px;
             }
 
             .modal-content {
-                padding: 20px;
+                padding: 22px;
                 width: 94%;
                 max-height: 85vh;
+                border-radius: var(--radius-lg);
             }
 
             .agendamento-card {
@@ -680,14 +891,21 @@
 </head>
 <body>
     <div class="topbar">
-        <h1>📦 Estoque WPP — Dashboard</h1>
-        <div class="topbar-actions">
-            <button class="btn btn-primary" onclick="logout()">Sair</button>
+        <div class="topbar-inner">
+            <div class="brand">
+                <img src="https://i.imgur.com/w9gPFpP.png" alt="Atende by Leanttro">
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-ghost btn-small" onclick="logout()">Sair</button>
+            </div>
         </div>
     </div>
     
     <div class="container">
         <!-- CARDS RESUMO -->
+        <div class="section-title">
+            <div class="section-title-left">Resumo<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Resumo do negócio</b>Números atualizados em tempo real: total de produtos cadastrados, valor parado em estoque e itens que estão acabando.</span></span></div>
+        </div>
         <div class="grid-3">
             <div class="card">
                 <h2>Total de Produtos</h2>
@@ -705,26 +923,26 @@
 
         <!-- ABAS -->
         <div class="tabs">
-            <button class="tab-btn active" onclick="abrirAba('produtos')">📦 Produtos</button>
-            <button class="tab-btn" onclick="abrirAba('agendamentos')">📅 Agendamentos</button>
-            <button class="tab-btn" onclick="abrirAba('materias')">🧪 Matérias-Primas</button>
-            <button class="tab-btn" onclick="abrirAba('vendas')">💰 Vendas</button>
-            <button class="tab-btn" onclick="abrirAba('orcamentos')">🧾 Orçamentos</button>
-            <button class="tab-btn" onclick="abrirAba('clientes')">👤 Clientes</button>
-            <button class="tab-btn" onclick="abrirAba('custos')">🧮 Custos</button>
-            <button class="tab-btn" onclick="abrirAba('agenda')">🗓️ Agenda</button>
+            <button class="tab-btn active" onclick="abrirAba('produtos')">Produtos</button>
+            <button class="tab-btn" onclick="abrirAba('agendamentos')">Agendamentos</button>
+            <button class="tab-btn" onclick="abrirAba('materias')">Matérias-Primas</button>
+            <button class="tab-btn" onclick="abrirAba('vendas')">Vendas</button>
+            <button class="tab-btn" onclick="abrirAba('orcamentos')">Orçamentos</button>
+            <button class="tab-btn" onclick="abrirAba('clientes')">Clientes</button>
+            <button class="tab-btn" onclick="abrirAba('custos')">Custos</button>
+            <button class="tab-btn" onclick="abrirAba('agenda')">Agenda</button>
         </div>
 
         <!-- ABA PRODUTOS -->
         <div id="tab-produtos" class="tab-content active">
             <div class="section-title">
-                Produtos
+                <div class="section-title-left">Produtos<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Produtos</b>Cadastre o que você vende, edite preço e custo direto na tabela. O estoque é descontado sozinho a cada venda feita pelo WhatsApp.</span></span></div>
                 <div class="export-buttons">
-                    <button class="btn btn-secondary btn-small" onclick="abrirModalProduto()">➕ Novo Produto</button>
-                    <button class="btn btn-secondary btn-small" onclick="downloadTemplateExcel()">📥 Baixar Template</button>
-                    <button class="btn btn-secondary btn-small" onclick="document.getElementById('fileImportProdutos').click()">📤 Importar Excel</button>
-                    <button class="btn btn-secondary btn-small" onclick="exportarCSV()">📊 CSV</button>
-                    <button class="btn btn-secondary btn-small" onclick="exportarExcel()">📈 Excel</button>
+                    <button class="btn btn-secondary btn-small" onclick="abrirModalProduto()">Novo Produto</button>
+                    <button class="btn btn-secondary btn-small" onclick="downloadTemplateExcel()">Baixar Template</button>
+                    <button class="btn btn-secondary btn-small" onclick="document.getElementById('fileImportProdutos').click()">Importar Excel</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarCSV()">CSV</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarExcel()">Excel</button>
                     <input type="file" id="fileImportProdutos" style="display:none" accept=".xlsx,.xls" onchange="importarExcel()">
                 </div>
             </div>
@@ -748,8 +966,8 @@
         <!-- ABA AGENDAMENTOS -->
         <div id="tab-agendamentos" class="tab-content">
             <div class="section-title">
-                Agendamentos
-                <button class="btn btn-success" onclick="abrirModalAgendamento()">➕ Novo Agendamento</button>
+                <div class="section-title-left">Agendamentos<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Agendamentos</b>Programe produções e encomendas futuras de um produto específico, com data, hora e quantidade — sem misturar com a Agenda de compromissos.</span></span></div>
+                <button class="btn btn-success" onclick="abrirModalAgendamento()">Novo Agendamento</button>
             </div>
             
             <div id="listaAgendamentos">
@@ -760,8 +978,8 @@
         <!-- ABA MATÉRIAS-PRIMAS -->
         <div id="tab-materias" class="tab-content">
             <div class="section-title">
-                Matérias-Primas
-                <button class="btn btn-secondary btn-small" onclick="abrirModalMateriaPrima()">➕ Nova Matéria-Prima</button>
+                <div class="section-title-left">Matérias-Primas<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Matérias-primas</b>Controle os insumos usados na produção. Vincule cada um a uma receita de produto para que o estoque seja descontado automaticamente a cada venda.</span></span></div>
+                <button class="btn btn-secondary btn-small" onclick="abrirModalMateriaPrima()">Nova Matéria-Prima</button>
             </div>
             
             <div class="table-container">
@@ -782,7 +1000,7 @@
         <!-- ABA VENDAS -->
         <div id="tab-vendas" class="tab-content">
             <div class="section-title">
-                Vendas
+                <div class="section-title-left">Vendas<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Vendas</b>Toda venda registrada pelo WhatsApp aparece aqui automaticamente, com data, produto, valor e cliente — sem precisar lançar nada na mão.</span></span></div>
             </div>
 
             <div class="table-container">
@@ -803,7 +1021,7 @@
         <!-- ABA ORÇAMENTOS -->
         <div id="tab-orcamentos" class="tab-content">
             <div class="section-title">
-                Orçamentos
+                <div class="section-title-left">Orçamentos<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Orçamentos</b>Veja os orçamentos gerados no WhatsApp para seus clientes, com os valores já calculados. É só copiar o texto e enviar.</span></span></div>
             </div>
 
             <div class="table-container">
@@ -823,15 +1041,15 @@
         <!-- ABA CLIENTES -->
         <div id="tab-clientes" class="tab-content">
             <div class="section-title">
-                Clientes
-                <button class="btn btn-success" onclick="abrirModalClienteNegocio()">➕ Novo Cliente</button>
+                <div class="section-title-left">Clientes<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Clientes</b>Cadastre os clientes do seu negócio pelo telefone. Assim, o WhatsApp reconhece quem está falando com você em vendas, orçamentos e histórico.</span></span></div>
+                <button class="btn btn-success" onclick="abrirModalClienteNegocio()">Novo Cliente</button>
             </div>
 
             <!-- ATENDIMENTO AUTOMÁTICO AO CLIENTE FINAL -->
             <div class="card" style="margin-bottom: 20px; border-left: 4px solid #25D366;">
                 <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
                     <div>
-                        <h2 style="margin-bottom:6px;">🤖 Atendimento automático pro cliente</h2>
+                        <h2 style="margin-bottom:6px; display:flex; align-items:center; gap:6px; text-transform:none; font-size:15px; color:var(--ink); letter-spacing:normal;">Atendimento automático pro cliente<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Atendimento automático</b>Quando ligado, os clientes cadastrados podem falar direto com este número do WhatsApp: ver produtos, pedir orçamento ou chamar você — sem mexer em estoque ou vendas.</span></span></h2>
                         <div style="font-size:13px; color:#666; max-width:520px;">
                             Quando ativado, os clientes cadastrados abaixo (pelo telefone) podem mandar
                             mensagem nesse mesmo número do WhatsApp e ver seus produtos/serviços, pedir
@@ -865,11 +1083,11 @@
         <!-- ABA CUSTOS -->
         <div id="tab-custos" class="tab-content">
             <div class="section-title">
-                Custos Fixos
+                <div class="section-title-left">Custos Fixos<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Custos fixos</b>Lance as contas fixas do mês (aluguel, luz, internet...). Elas entram automaticamente na Calculadora de Preço logo abaixo.</span></span></div>
                 <div class="export-buttons">
-                    <button class="btn btn-success btn-small" onclick="abrirModalCustoFixo()">➕ Nova Conta</button>
-                    <button class="btn btn-secondary btn-small" onclick="exportarCustosFixosCSV()">📊 CSV</button>
-                    <button class="btn btn-secondary btn-small" onclick="exportarCustosFixosExcel()">📈 Excel</button>
+                    <button class="btn btn-success btn-small" onclick="abrirModalCustoFixo()">Nova Conta</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarCustosFixosCSV()">CSV</button>
+                    <button class="btn btn-secondary btn-small" onclick="exportarCustosFixosExcel()">Excel</button>
                 </div>
             </div>
 
@@ -889,7 +1107,7 @@
                 <div class="subtext">Soma mensal de todas as contas</div>
             </div>
 
-            <div class="section-title">🧮 Calculadora de Preço</div>
+            <div class="section-title"><div class="section-title-left">Calculadora de Preço<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Calculadora de preço</b>Descubra o preço ideal de venda considerando o custo variável, o volume esperado de vendas e a margem de lucro que você quer ter.</span></span></div></div>
             <div class="card" style="margin-bottom: 30px;">
                 <div class="form-group">
                     <label>Produto (opcional — preenche o custo variável automaticamente)</label>
@@ -924,12 +1142,12 @@
         <!-- ABA AGENDA -->
         <div id="tab-agenda" class="tab-content">
             <div class="section-title">
-                Agenda
+                <div class="section-title-left">Agenda<span class="info-tip" tabindex="0" onclick="toggleInfoTip(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A6 6 0 1 0 7.5 11.5c.76.76 1.23 1.52 1.41 2.5"/></svg><span class="info-tip-bubble"><b>Agenda</b>Organize compromissos e receba lembretes por WhatsApp antes do horário. Veja tudo por mês, semana ou dia.</span></span></div>
                 <div class="export-buttons">
                     <button class="btn btn-secondary btn-small" onclick="mudarVisaoAgenda('mes')">Mês</button>
                     <button class="btn btn-secondary btn-small" onclick="mudarVisaoAgenda('semana')">Semana</button>
                     <button class="btn btn-secondary btn-small" onclick="mudarVisaoAgenda('dia')">Dia</button>
-                    <button class="btn btn-success btn-small" onclick="abrirModalCompromisso()">➕ Novo Compromisso</button>
+                    <button class="btn btn-success btn-small" onclick="abrirModalCompromisso()">Novo Compromisso</button>
                 </div>
             </div>
 
@@ -984,7 +1202,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="salvarProduto()">Salvar</button>
-                <button class="btn btn-secondary" onclick="fecharModalProduto()" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModalProduto()">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1019,7 +1237,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-success" onclick="salvarAgendamento()">Agendar</button>
-                <button class="btn btn-secondary" onclick="fecharModalAgendamento()" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModalAgendamento()">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1058,7 +1276,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="salvarMateriaPrima()">Salvar</button>
-                <button class="btn btn-secondary" onclick="fecharModalMateriaPrima()" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModalMateriaPrima()">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1074,14 +1292,14 @@
                     automaticamente do estoque, na quantidade informada aqui.
                 </p>
                 <div id="listaReceitaItens"></div>
-                <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px;" onclick="adicionarLinhaReceita()">➕ Adicionar matéria-prima</button>
+                <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px;" onclick="adicionarLinhaReceita()">Adicionar matéria-prima</button>
                 <div id="receitaSemMateriaPrima" style="display:none; color:#999; font-size:13px; margin-top:10px;">
                     Você ainda não tem matéria-prima cadastrada. Cadastre na aba Matérias-Primas antes de montar a receita.
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="salvarReceita()">Salvar</button>
-                <button class="btn btn-secondary" onclick="fecharModal('modalReceita')" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModal('modalReceita')">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1094,8 +1312,8 @@
                 <textarea id="textoOrcamentoFormatado" readonly style="min-height:300px; white-space:pre-wrap;"></textarea>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="copiarTextoOrcamento()">📋 Copiar</button>
-                <button class="btn btn-secondary" onclick="fecharModal('modalTextoOrcamento')" style="background:#999">Fechar</button>
+                <button class="btn btn-secondary" onclick="copiarTextoOrcamento()">Copiar</button>
+                <button class="btn btn-ghost" onclick="fecharModal('modalTextoOrcamento')">Fechar</button>
             </div>
         </div>
     </div>
@@ -1117,7 +1335,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="salvarClienteNegocio()">Salvar</button>
-                <button class="btn btn-secondary" onclick="fecharModal('modalClienteNegocio')" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModal('modalClienteNegocio')">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1130,7 +1348,7 @@
                 <div id="listaHistoricoCliente">Carregando...</div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="fecharModal('modalHistoricoCliente')" style="background:#999">Fechar</button>
+                <button class="btn btn-ghost" onclick="fecharModal('modalHistoricoCliente')">Fechar</button>
             </div>
         </div>
     </div>
@@ -1152,7 +1370,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="salvarCustoFixo()">Salvar</button>
-                <button class="btn btn-secondary" onclick="fecharModal('modalCustoFixo')" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModal('modalCustoFixo')">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1201,12 +1419,29 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-success" onclick="salvarCompromisso()">Salvar</button>
-                <button class="btn btn-secondary" onclick="fecharModal('modalCompromisso')" style="background:#999">Cancelar</button>
+                <button class="btn btn-ghost" onclick="fecharModal('modalCompromisso')">Cancelar</button>
             </div>
         </div>
     </div>
 
     <script>
+        // Ícones (substituem os emojis antigos) e o toggle do "manual de uso" (lâmpada).
+        const ICONS = {
+            edit: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+            trash: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>',
+            doc: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>'
+        };
+
+        function toggleInfoTip(el) {
+            document.querySelectorAll('.info-tip.open').forEach(t => { if (t !== el) t.classList.remove('open'); });
+            el.classList.toggle('open');
+        }
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.info-tip')) {
+                document.querySelectorAll('.info-tip.open').forEach(t => t.classList.remove('open'));
+            }
+        });
+
         const API_URL = window.location.origin;
         const token = localStorage.getItem('token');
         
@@ -1334,8 +1569,8 @@
                         </span>
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn btn-secondary btn-small" onclick="abrirModalProdutoEditar(${p.id})">✏️</button>
-                        <button class="btn btn-secondary btn-small" onclick="abrirModalReceita(${p.id})">📝</button>
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalProdutoEditar(${p.id})">${ICONS.edit} Editar</button>
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalReceita(${p.id})">${ICONS.doc} Receita</button>
                     </div>
                 </div>
             `).join('');
@@ -1448,7 +1683,7 @@
                     <div data-label="Estoque">${m.estoque_atual}</div>
                     <div data-label="Unidade">${m.unidade}</div>
                     <div>
-                        <button class="btn btn-secondary btn-small" onclick="deletarMateria(${m.id})">🗑️ Deletar</button>
+                        <button class="btn btn-danger btn-small" onclick="deletarMateria(${m.id})">${ICONS.trash} Excluir</button>
                     </div>
                 </div>
             `).join('');
@@ -1482,12 +1717,12 @@
                     <div class="agendamento-card">
                         <div class="agendamento-info">
                             <strong>${a.produto_nome}</strong>
-                            <small>📅 ${dataStr} às ${horaStr}</small>
-                            <small style="display:block">📦 ${a.quantidade} unidades</small>
-                            ${a.notas ? `<small style="display:block; margin-top:5px; color:#666;">📝 ${a.notas}</small>` : ''}
+                            <small>${dataStr} às ${horaStr}</small>
+                            <small style="display:block">${a.quantidade} unidades</small>
+                            ${a.notas ? `<small style="display:block; margin-top:5px; color:#666;">Obs: ${a.notas}</small>` : ''}
                         </div>
                         <div class="agendamento-actions">
-                            <button class="btn btn-secondary btn-small" onclick="deletarAgendamento(${a.id})">🗑️</button>
+                            <button class="btn btn-danger btn-small" onclick="deletarAgendamento(${a.id})">${ICONS.trash} Excluir</button>
                         </div>
                     </div>
                 `;
@@ -1545,7 +1780,7 @@
                         <div data-label="Valor">R$ ${parseFloat(v.valor_total || 0).toFixed(2)}</div>
                         <div data-label="Cliente">${v.cliente_negocio_nome || '-'}</div>
                         <div>
-                            <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarVenda(${v.id})">🗑️ Excluir</button>
+                            <button class="btn btn-danger btn-small" onclick="deletarVenda(${v.id})">${ICONS.trash} Excluir</button>
                         </div>
                     </div>
                 `;
@@ -1608,8 +1843,8 @@
                         <div data-label="Itens" title="${resumoItens}">${itens.length} item(ns)</div>
                         <div data-label="Total">R$ ${parseFloat(o.total || 0).toFixed(2)}</div>
                         <div style="display:flex; gap:6px;">
-                            <button class="btn btn-secondary btn-small" onclick="verTextoOrcamento(${o.id})">📄</button>
-                            <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarOrcamento(${o.id})">🗑️</button>
+                            <button class="btn btn-secondary btn-small" onclick="verTextoOrcamento(${o.id})">${ICONS.doc} Ver</button>
+                            <button class="btn btn-danger btn-small" onclick="deletarOrcamento(${o.id})">${ICONS.trash} Excluir</button>
                         </div>
                     </div>
                 `;
@@ -1674,9 +1909,9 @@
                         <div data-label="Telefone">${c.telefone || '-'}</div>
                         <div data-label="Desde">${desde}</div>
                         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                            <button class="btn btn-secondary btn-small" onclick="verHistoricoCliente(${c.id})">📜 Histórico</button>
-                            <button class="btn btn-secondary btn-small" onclick="abrirModalClienteNegocioEditar(${c.id})">✏️</button>
-                            <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarClienteNegocio(${c.id})">🗑️</button>
+                            <button class="btn btn-secondary btn-small" onclick="verHistoricoCliente(${c.id})">${ICONS.doc} Histórico</button>
+                            <button class="btn btn-secondary btn-small" onclick="abrirModalClienteNegocioEditar(${c.id})">${ICONS.edit} Editar</button>
+                            <button class="btn btn-danger btn-small" onclick="deletarClienteNegocio(${c.id})">${ICONS.trash} Excluir</button>
                         </div>
                     </div>
                 `;
@@ -1770,9 +2005,9 @@
                 document.getElementById('listaHistoricoCliente').innerHTML = historico.map(h => {
                     const data = new Date(h.criado_em).toLocaleDateString('pt-BR');
                     if (h.tipo_registro === 'venda') {
-                        return `<div style="padding:8px 0; border-bottom:1px solid #f0f0f0;">💰 ${data} — ${h.produto_nome} (${h.quantidade}) — R$ ${parseFloat(h.valor_total || 0).toFixed(2)}</div>`;
+                        return `<div style="padding:8px 0; border-bottom:1px solid #f0f0f0;">${data} — Venda: ${h.produto_nome} (${h.quantidade}) — R$ ${parseFloat(h.valor_total || 0).toFixed(2)}</div>`;
                     }
-                    return `<div style="padding:8px 0; border-bottom:1px solid #f0f0f0;">🧾 ${data} — Orçamento — R$ ${parseFloat(h.total || 0).toFixed(2)}</div>`;
+                    return `<div style="padding:8px 0; border-bottom:1px solid #f0f0f0;">${data} — Orçamento — R$ ${parseFloat(h.total || 0).toFixed(2)}</div>`;
                 }).join('');
             } catch (err) {
                 document.getElementById('listaHistoricoCliente').innerHTML = 'Erro ao carregar histórico.';
@@ -1811,8 +2046,8 @@
                     <div data-label="Conta">${c.nome_da_conta}</div>
                     <div data-label="Valor">R$ ${parseFloat(c.valor || 0).toFixed(2)}</div>
                     <div style="display:flex; gap:6px;">
-                        <button class="btn btn-secondary btn-small" onclick="abrirModalCustoFixoEditar(${c.id})">✏️</button>
-                        <button class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;" onclick="deletarCustoFixo(${c.id})">🗑️</button>
+                        <button class="btn btn-secondary btn-small" onclick="abrirModalCustoFixoEditar(${c.id})">${ICONS.edit} Editar</button>
+                        <button class="btn btn-danger btn-small" onclick="deletarCustoFixo(${c.id})">${ICONS.trash} Excluir</button>
                     </div>
                 </div>
             `).join('');
@@ -2060,8 +2295,8 @@
                 </select>
                 <input type="number" step="0.001" placeholder="Qtd por unidade" style="flex:1;"
                        class="receita-qtd-input" value="${quantidade != null ? quantidade : ''}">
-                <button type="button" class="btn btn-danger btn-small" style="background:#ffe0e0; color:#c33;"
-                        onclick="document.getElementById('${linhaId}').remove()">🗑️</button>
+                <button type="button" class="btn btn-danger btn-small"
+                        onclick="document.getElementById('${linhaId}').remove()">${ICONS.trash}</button>
             `;
             div.appendChild(linha);
         }
@@ -2252,12 +2487,12 @@
             })
             .then(res => res.json())
             .then(data => {
-                let msg = `✅ ${data.produtos_criados} produtos importados`;
+                let msg = `${data.produtos_criados} produtos importados com sucesso`;
                 if (data.materias_primas_criadas) msg += `, ${data.materias_primas_criadas} matérias-primas criadas`;
                 if (data.receitas_vinculadas) msg += `, ${data.receitas_vinculadas} vínculos de receita salvos`;
                 msg += '!';
                 if (data.avisos && data.avisos.length > 0) {
-                    msg += `\n\n⚠️ Alguns itens da aba Receita não foram vinculados:\n` + data.avisos.join('\n');
+                    msg += `\n\nAtenção: alguns itens da aba Receita não foram vinculados:\n` + data.avisos.join('\n');
                 }
                 alert(msg);
                 carregarProdutos();
@@ -2428,13 +2663,13 @@
                     html += `<div class="agendamento-card">
                         <div class="agendamento-info">
                             <strong>${c.hora_inicio.slice(0,5)}${c.hora_fim ? ' - ' + c.hora_fim.slice(0,5) : ''} — ${c.titulo}</strong>
-                            ${c.cliente_negocio_nome ? `<small>👤 ${c.cliente_negocio_nome}</small>` : ''}
-                            ${c.notas ? `<small style="display:block; color:#666;">📝 ${c.notas}</small>` : ''}
+                            ${c.cliente_negocio_nome ? `<small>Cliente: ${c.cliente_negocio_nome}</small>` : ''}
+                            ${c.notas ? `<small style="display:block; color:#666;">Obs: ${c.notas}</small>` : ''}
                             ${c.status === 'cancelado' ? '<small style="color:#c0392b;">Cancelado</small>' : ''}
                         </div>
                         <div class="agendamento-actions">
-                            <button class="btn btn-secondary btn-small" onclick="abrirModalCompromissoEditar(${c.id})">✏️</button>
-                            <button class="btn btn-secondary btn-small" onclick="deletarCompromisso(${c.id})">🗑️</button>
+                            <button class="btn btn-secondary btn-small" onclick="abrirModalCompromissoEditar(${c.id})">${ICONS.edit} Editar</button>
+                            <button class="btn btn-danger btn-small" onclick="deletarCompromisso(${c.id})">${ICONS.trash} Excluir</button>
                         </div>
                     </div>`;
                 });
@@ -2532,7 +2767,7 @@
                 await carregarAgenda();
 
                 if (resultado.aviso_conflito && resultado.aviso_conflito.length > 0) {
-                    alert('⚠️ Compromisso salvo, mas há conflito de horário com: ' + resultado.aviso_conflito.join(', '));
+                    alert('Compromisso salvo, mas há conflito de horário com: ' + resultado.aviso_conflito.join(', '));
                 }
             } catch (err) {
                 alert('Erro: ' + err.message);
