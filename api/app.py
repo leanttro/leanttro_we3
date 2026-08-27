@@ -1288,7 +1288,7 @@ async def processar_texto_cliente_final(conn, cliente: dict, numero: str, texto:
                 "Digite *menu* a qualquer momento para voltar às opções."
             )
 
-        return "👋 Olá! Em que posso ajudar?" + MENU_CLIENTE_FINAL
+        return MENU_CLIENTE_FINAL
 
     # ── Pedido de orçamento: escolheu o(s) produto(s), agora pede a quantidade de cada um ──
     if etapa == "cf_orc_escolha_produto":
