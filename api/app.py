@@ -4397,6 +4397,20 @@ async def webhook_mensagem(payload: dict, conn=Depends(get_db)):
             await enviar_whatsapp(remote_jid, resposta)
             return {"ok": True}
 
+    # ── Ninguém reconheceu esse número: cai na conta de demonstração ──
+    # Em vez de rejeitar quem nunca falou com o sistema, mostramos o modo
+    # "cliente final" usando a conta teste@leanttro.com — assim qualquer
+    # visitante já experimenta na prática como fica o atendimento automático
+    # de uma empresa com número próprio, sem precisar de convite ou cadastro.
+    cliente_demo = db_one(conn, """
+        SELECT * FROM clientes
+        WHERE email = 'teste@leanttro.com' AND ativo = TRUE AND atendimento_cliente_final_ativado = TRUE
+    """)
+    if cliente_demo:
+        resposta = await processar_texto_cliente_final(conn, cliente_demo, numero, texto)
+        await enviar_whatsapp(remote_jid, resposta)
+        return {"ok": True}
+
     await enviar_whatsapp(remote_jid, "❌ Número não autorizado. Fale com o administrador do sistema.")
     return {"ok": True}
 
