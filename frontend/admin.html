@@ -433,6 +433,31 @@
         </div>
     </div>
 
+    <!-- MODAL EDITAR LOGIN (EMAIL / SENHA) -->
+    <div id="modalCredenciais" class="modal">
+        <div class="modal-content">
+            <h2>Editar login do cliente</h2>
+            <input type="hidden" id="credClienteId">
+            <p id="credNegocio" style="margin:-10px 0 18px; color:#999; font-size:13px;"></p>
+
+            <div class="form-group">
+                <label>Email (login do painel)</label>
+                <input type="email" id="credEmail" placeholder="cliente@email.com" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label>Nova senha</label>
+                <input type="text" id="credSenha" placeholder="deixe em branco para manter a atual" autocomplete="new-password">
+                <small style="color:#999; font-size:12px;">Mínimo de 6 caracteres. Só será alterada se você preencher.</small>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="fecharModalCredenciais()">Cancelar</button>
+                <button class="btn btn-primary" style="background:#667eea;color:white;" onclick="salvarCredenciais()">Salvar</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -534,6 +559,7 @@
                             <span class="badge ${c.ativo ? 'badge-ok' : 'badge-off'}">${c.ativo ? 'Ativo' : 'Inativo'}</span>
                         </div>
                         <div class="row-actions">
+                            <button class="btn btn-outline btn-small" onclick="abrirModalCredenciais(${c.id})">Editar login</button>
                             <button class="btn btn-outline btn-small" onclick="toggleAtivo(${c.id}, ${!c.ativo})">
                                 ${c.ativo ? 'Desativar' : 'Ativar'}
                             </button>
@@ -655,6 +681,57 @@
                 const res = await apiFetch(`/admin/clientes/${clienteId}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('Erro ao excluir cliente');
                 showToast('Cliente excluído.');
+                carregarClientes();
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        }
+
+        // ── EDITAR EMAIL / SENHA ──
+        function abrirModalCredenciais(clienteId) {
+            const c = clientes.find(x => x.id === clienteId);
+            if (!c) return;
+            document.getElementById('credClienteId').value = clienteId;
+            document.getElementById('credNegocio').textContent = c.nome_negocio;
+            document.getElementById('credEmail').value = c.email || '';
+            document.getElementById('credSenha').value = '';
+            document.getElementById('modalCredenciais').classList.add('show');
+        }
+        function fecharModalCredenciais() {
+            document.getElementById('modalCredenciais').classList.remove('show');
+            document.getElementById('credSenha').value = '';
+        }
+
+        async function salvarCredenciais() {
+            const clienteId = parseInt(document.getElementById('credClienteId').value, 10);
+            const c = clientes.find(x => x.id === clienteId);
+            const email = document.getElementById('credEmail').value.trim();
+            const senha = document.getElementById('credSenha').value;
+
+            const body = {};
+            if (email && (!c || email.toLowerCase() !== (c.email || '').toLowerCase())) body.email = email;
+            if (senha) body.senha = senha;
+
+            if (!Object.keys(body).length) {
+                showToast('Nada para alterar.', true);
+                return;
+            }
+            if (body.senha && body.senha.length < 6) {
+                showToast('A senha precisa ter ao menos 6 caracteres.', true);
+                return;
+            }
+
+            try {
+                const res = await apiFetch(`/admin/clientes/${clienteId}/credenciais`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Erro ao salvar');
+
+                fecharModalCredenciais();
+                showToast('Login atualizado.');
                 carregarClientes();
             } catch (err) {
                 showToast(err.message, true);
