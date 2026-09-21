@@ -239,6 +239,10 @@ class AdminModulosBody(BaseModel):
 class AdminAtivoBody(BaseModel):
     ativo: bool
 
+class AdminCredenciaisBody(BaseModel):
+    email: Optional[str] = None   # novo email de login (opcional)
+    senha: Optional[str] = None   # nova senha (opcional)
+
 class AtendimentoClienteFinalBody(BaseModel):
     ativado: bool
 
@@ -3376,6 +3380,46 @@ def admin_trocar_modulos(cliente_id: int, body: AdminModulosBody, conn=Depends(g
         raise HTTPException(status_code=400, detail="Informe ao menos um módulo válido (estoque, agenda)")
     db_exec(conn, "UPDATE clientes SET modulos = %s WHERE id = %s", (modulos_validos, cliente_id))
     return {"ok": True}
+
+@app.patch("/admin/clientes/{cliente_id}/credenciais")
+def admin_trocar_credenciais(cliente_id: int, body: AdminCredenciaisBody,
+                             conn=Depends(get_db), _admin=Depends(check_admin)):
+    """Permite ao admin trocar o email e/ou a senha de login de um cliente."""
+    email = (body.email or "").strip() or None
+    senha = body.senha or None
+
+    if not email and not senha:
+        raise HTTPException(status_code=400, detail="Informe o novo email e/ou a nova senha")
+
+    cliente = db_one(conn, "SELECT id FROM clientes WHERE id = %s", (cliente_id,))
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    if email:
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            raise HTTPException(status_code=400, detail="Email inválido")
+        duplicado = db_one(
+            conn,
+            "SELECT id FROM clientes WHERE LOWER(email) = LOWER(%s) AND id <> %s",
+            (email, cliente_id),
+        )
+        if duplicado:
+            raise HTTPException(status_code=400, detail="Esse email já está em uso por outro cliente")
+
+    if senha and len(senha) < 6:
+        raise HTTPException(status_code=400, detail="A senha precisa ter ao menos 6 caracteres")
+
+    campos, params = [], []
+    if email:
+        campos.append("email = %s")
+        params.append(email)
+    if senha:
+        campos.append("senha_hash = %s")
+        params.append(bcrypt.hashpw(senha.encode(), bcrypt.gensalt()).decode())
+    params.append(cliente_id)
+
+    db_exec(conn, f"UPDATE clientes SET {', '.join(campos)} WHERE id = %s", tuple(params))
+    return {"ok": True, "email_alterado": bool(email), "senha_alterada": bool(senha)}
 
 @app.patch("/admin/clientes/{cliente_id}/ativo")
 def admin_toggle_ativo(cliente_id: int, body: AdminAtivoBody, conn=Depends(get_db), _admin=Depends(check_admin)):
