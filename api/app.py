@@ -1640,7 +1640,7 @@ async def processar_texto(conn, cliente: dict, numero_autorizado: dict, texto: s
 
     if eh_saudacao(texto_low):
         salvar_sessao(conn, numero_autorizado_id, etapa_raiz_para_modulos(modulos), {})
-        return "Oi, tudo bem? 😊\n\n" + texto_raiz_para_modulos(modulos)
+        return "Oi, tudo bem? 😊 Como posso te ajudar? Se quiser ver as opções, é só digitar *menu*."
 
     # ── ETAPA: escolher módulo (só aparece pra cliente com estoque + agenda ativos) ──
     if etapa == "escolher_modulo":
